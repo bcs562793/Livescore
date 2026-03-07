@@ -1,0 +1,32 @@
+name: Match Statistics Bot
+
+on:
+  # Manuel olarak GitHub üzerinden butona basıp çalıştırmak istersen:
+  workflow_dispatch: 
+  
+  # Otomatik çalışması için zamanlayıcı (Cron - UTC saatine göre çalışır)
+  schedule:
+    # Örneğin: Her gece Türkiye saatiyle 03:00'te çalışması için UTC 00:00 yazıyoruz
+    - cron: '0 0 * * *'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Depoyu Çek
+        uses: actions/checkout@v4
+
+      - name: Dart Ortamını Kur
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Paketleri İndir
+        run: dart pub get
+
+      - name: İstatistik Botunu Çalıştır
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: dart run stats_bot.dart
