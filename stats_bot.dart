@@ -153,49 +153,117 @@ Future<String> _macFetchStats(int mackolikId) async {
 }
 
 // ─── 2. TRANSFORM FONKSİYONU ───
-List<Map<String, dynamic>>? _macTransformStatistics(String html, Map<String, dynamic> teams) {
-  if (html.trim().length < 20) return null;
-  if (html.trim().startsWith('{') || html.trim().startsWith('[')) return null;
+// Mackolik optaStats düz metin döndürür: "değer\tbaşlık\tdeğer\tbaşlık..."
+// API-Football formatına dönüştür: [{"team": {...}, "statistics": [{type, value}, ...]}]
+List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dynamic> teams) {
+  if (text.trim().length < 20) return null;
+  if (text.trim().startsWith('{') || text.trim().startsWith('[')) return null;
 
-  final homeValues = RegExp(r'team-1-statistics-text"[^>]*>\s*([^<]+)\s*<')
-      .allMatches(html).map((m) => m.group(1)!.trim()).toList();
-  final titles = RegExp(r'statistics-title-text"[^>]*>\s*([^<]+)\s*<')
-      .allMatches(html).map((m) => m.group(1)!.trim()).toList();
-  final awayValues = RegExp(r'team-2-statistics-text"[^>]*>\s*([^<]+)\s*<')
-      .allMatches(html).map((m) => m.group(1)!.trim()).toList();
+  // Mackolik formatı: sırasıyla ev sahibi değeri, başlık, deplasman değeri, başlık...
+  // Örnek: "%77\nTopla Oynama\n%23\n6\nToplam Şut\n7\n..."
+  final lines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
 
-  if (homeValues.isEmpty || titles.isEmpty || awayValues.isEmpty) return null;
-
-  final count = [homeValues.length, titles.length, awayValues.length].reduce((a, b) => a < b ? a : b);
-  if (count == 0) return null;
-
-  dynamic fmtVal(String raw) {
-    raw = raw.trim();
-    if (raw.startsWith('%')) return '${raw.substring(1)}%';
-    if (raw.contains('/')) return raw;
-    final n = int.tryParse(raw);
-    return n ?? raw; 
-  }
+  if (lines.isEmpty) return null;
 
   final homeStats = <Map<String, dynamic>>[];
   final awayStats = <Map<String, dynamic>>[];
 
-  for (int i = 0; i < count; i++) {
-    final titleEN = _statsNameMap[titles[i]] ?? titles[i]; 
-    homeStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(homeValues[i])});
-    awayStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(awayValues[i])});
+  // İlk satır genellikle "İstatistikler" başlığıdır, atla
+  int startIndex = lines[0].contains('İstatistikler') ? 1 : 0;
+
+  // Mackolik'te sıra: evdeğer, başlık, deplasman değeri, başlık...
+  // Yani 4'lü gruplar halinde: [homeVal, title, awayVal, title, ...]
+  for (int i = startIndex; i + 2 < lines.length; i += 3) {
+    final awayValue = lines[i];       // Deplasman değeri
+    final title = lines[i + 1];       // İstatistik adı
+    final homeValue = lines[i + 2];  // Ev sahibi değeri
+
+    if (title.isEmpty) continue;
+
+    // Başlığı İngilizce'ye çevir
+    final titleEN = _statsNameMap[title] ?? _statsNameMap[title.replaceAll('(%)', '').trim()] ?? title;
+
+    // Değeri formatla
+    dynamic fmtVal(String raw) {
+      raw = raw.trim();
+      if (raw.startsWith('%')) return raw; // "%77" şeklinde kalır
+      if (raw.contains('/')) return raw;   // "1/10" şeklinde kalır
+      final n = int.tryParse(raw);
+      return n ?? raw;
+    }
+
+    homeStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(homeValue)});
+    awayStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(awayValue)});
   }
+
+  if (homeStats.isEmpty || awayStats.isEmpty) {
+    print('  ⚠️ [UYARI] Parse edilen istatistik bulunamadı, alternatif yöntem deneniyor...');
+
+    // Alternatif: Her satırı tek tek dene
+    // Format: değer\tdeğer\tbaşlık veya başlık\tdeğer\tdeğer
+    final altLines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty && !l.contains('İstatistikler')).toList();
+
+    for (int i = 0; i + 2 < altLines.length; i++) {
+      final line1 = altLines[i];
+      final line2 = altLines[i + 1];
+      final line3 = altLines[i + 2];
+
+      // Başlık hangisinde?
+      String? title;
+      String? homeVal;
+      String? awayVal;
+
+      if (!_isNumeric(line1) && !line1.startsWith('%') && !line1.contains('/')) {
+        title = line1;
+        homeVal = line2;
+        awayVal = line3;
+      } else if (!_isNumeric(line2) && !line2.startsWith('%') && !line2.contains('/')) {
+        title = line2;
+        homeVal = line1;
+        awayVal = line3;
+      } else {
+        continue;
+      }
+
+      if (title == null || homeVal == null || awayVal == null) continue;
+
+      final titleEN = _statsNameMap[title] ?? _statsNameMap[title.replaceAll('(%)', '').trim()] ?? title;
+
+      dynamic fmtVal(String raw) {
+        raw = raw.trim();
+        if (raw.startsWith('%')) return raw;
+        if (raw.contains('/')) return raw;
+        final n = int.tryParse(raw);
+        return n ?? raw;
+      }
+
+      // Tekrarlanmayı kontrol et
+      if (!homeStats.any((s) => s['type'] == titleEN)) {
+        homeStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(homeVal)});
+        awayStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(awayVal)});
+      }
+    }
+  }
+
+  if (homeStats.isEmpty) return null;
+
+  print('  📊 [LOG] ${homeStats.length} istatistik başlığı işlendi.');
 
   return [
     {
-      'team': {'id': teams['home']?['id'], 'name': teams['home']?['name'] ?? '', 'logo': teams['home']?['logo'] ?? ''}, 
+      'team': {'id': teams['home']?['id'], 'name': teams['home']?['name'] ?? '', 'logo': teams['home']?['logo'] ?? ''},
       'statistics': homeStats
     },
     {
-      'team': {'id': teams['away']?['id'], 'name': teams['away']?['name'] ?? '', 'logo': teams['away']?['logo'] ?? ''}, 
+      'team': {'id': teams['away']?['id'], 'name': teams['away']?['name'] ?? '', 'logo': teams['away']?['logo'] ?? ''},
       'statistics': awayStats
     },
   ];
+}
+
+// Yardımcı: Sayı mı kontrolü
+bool _isNumeric(String str) {
+  return int.tryParse(str.trim()) != null;
 }
 
 // ─── ANA ÇALIŞTIRICI ───
