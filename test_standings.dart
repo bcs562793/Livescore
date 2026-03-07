@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:supabase/supabase.dart';
 
-// ─── GEREKLİ SABİTLER ───
+// ─── SABİTLER ───
 final _macHeaders = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   'Accept': 'text/html,application/json,*/*',
@@ -23,7 +25,7 @@ Future<String> _macFetchStandings(int mackolikId) async {
   }
 }
 
-// ─── 2. TRANSFORM FONKSİYONU (Ana koda ekleyeceğimiz fonksiyon) ───
+// ─── 2. TRANSFORM FONKSİYONU ───
 List<Map<String, dynamic>>? _macTransformStandings(String html) {
   if (html.trim().length < 50) return null;
   final standings = <Map<String, dynamic>>[];
@@ -56,7 +58,7 @@ List<Map<String, dynamic>>? _macTransformStandings(String html) {
       'all': {'played': nums[0], 'win': nums[1], 'draw': nums[2], 'lose': nums[3], 'goals': {'for': 0, 'against': 0}},
       'home': {'played': 0, 'win': 0, 'draw': 0, 'lose': 0, 'goals': {'for': 0, 'against': 0}},
       'away': {'played': 0, 'win': 0, 'draw': 0, 'lose': 0, 'goals': {'for': 0, 'against': 0}},
-      'update': DateTime.now().toIso8601String(),
+      'update': DateTime.now().toUtc().toIso8601String(),
     });
   }
   return standings.isNotEmpty ? standings : null;
@@ -64,11 +66,21 @@ List<Map<String, dynamic>>? _macTransformStandings(String html) {
 
 // ─── ANA ÇALIŞTIRICI ───
 void main() async {
-  // TEST İÇİN GEÇERLİ BİR MACKOLİK MAÇ ID'Sİ GİRİNİZ (Puan durumu olan bir ligden)
-  // Örneğin 3676100 veya veri çektiğinden emin olduğun güncel bir ID.
-  int testMackolikId = 3676100; 
-  int testLeagueId = 39; // Premier League örnek
-  int testSeason = 2023;
+  // SUPABASE BAĞLANTISI
+  final sbUrl = Platform.environment['SUPABASE_URL'] ?? '';
+  final sbKey = Platform.environment['SUPABASE_KEY'] ?? '';
+
+  if (sbUrl.isEmpty || sbKey.isEmpty) {
+    print('❌ SUPABASE_URL veya SUPABASE_KEY bulunamadı! Lütfen env değişkenlerini kontrol et.');
+    exit(1);
+  }
+
+  final sb = SupabaseClient(sbUrl, sbKey);
+
+  // TEST VERİLERİ (Örneğin Süper Lig veya takip ettiğin bir ligin güncel bir maçı)
+  int testMackolikId = 4291696; // Buraya puan durumu olan bir maçın Mackolik ID'sini yaz.
+  int testLeagueId = 135;      // Test olduğu belli olsun diye sahte bir Lig ID'si (veya var olan bir lig id'si kullanıp sonradan silebilirsin)
+  int testSeason = 2026;
 
   print('📡 Mackolik verisi çekiliyor (ID: $testMackolikId)...');
   String html = await _macFetchStandings(testMackolikId);
@@ -82,7 +94,6 @@ void main() async {
   List<Map<String, dynamic>>? standingsList = _macTransformStandings(html);
 
   if (standingsList != null) {
-    // BURASI_fetchAndSaveStandings İÇİNDEKİ SARMALAMA MANTIĞI
     final formattedData = {
       "get": "standings",
       "parameters": {"league": testLeagueId.toString(), "season": testSeason.toString()},
@@ -101,9 +112,20 @@ void main() async {
       ]
     };
 
-    print('\n🎯 DÖNÜŞTÜRÜLMÜŞ JSON ÇIKTISI:\n');
-    const encoder = JsonEncoder.withIndent('  ');
-    print(encoder.convert(formattedData));
+    print('🚀 Supabase "league_standings" tablosuna yazılıyor...');
+    
+    try {
+      await sb.from('league_standings').upsert({
+        'league_id': testLeagueId,
+        'data': formattedData,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'league_id');
+      
+      print('🎉 BAŞARILI! Veri Supabase tablosuna yazıldı. (League ID: $testLeagueId)');
+    } catch (e) {
+      print('❌ Supabase yazma hatası: $e');
+    }
+    
   } else {
     print('❌ Puan durumu parse edilemedi.');
   }
