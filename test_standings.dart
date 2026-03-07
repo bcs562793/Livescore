@@ -66,6 +66,8 @@ List<Map<String, dynamic>>? _macTransformStandings(String html) {
 
 // ─── ANA ÇALIŞTIRICI ───
 void main() async {
+  print('🚀 Puan Durumu Botu Başlatılıyor...\n');
+
   // SUPABASE BAĞLANTISI
   final sbUrl = Platform.environment['SUPABASE_URL'] ?? '';
   final sbKey = Platform.environment['SUPABASE_KEY'] ?? '';
@@ -76,57 +78,110 @@ void main() async {
   }
 
   final sb = SupabaseClient(sbUrl, sbKey);
+  int targetSeason = 2026; // Geçerli sezon
 
-  // TEST VERİLERİ (Örneğin Süper Lig veya takip ettiğin bir ligin güncel bir maçı)
-  int testMackolikId = 4291696; // Buraya puan durumu olan bir maçın Mackolik ID'sini yaz.
-  int testLeagueId = 135;      // Test olduğu belli olsun diye sahte bir Lig ID'si (veya var olan bir lig id'si kullanıp sonradan silebilirsin)
-  int testSeason = 2026;
+  // ─── 40 LİG LİSTESİ BURAYA GELECEK ───
+  // Format: { Lig ID'si : O Lige Ait Herhangi Bir Geçerli Mackolik Maç ID'si }
+  final Map<int, int> leaguesToUpdate = {
+    135: 4291696, // İtalya Serie A
+    39: 4295685, // İngiltere Premier Lig (Örnek)
+    40: 4302206, // İspanya La Liga (Örnek)
+    41: 4304088, // İtalya Serie A
+    42: 4304648, // İngiltere Premier Lig (Örnek)
+    43: 4334791, // İspanya La Liga (Örnek)
+    50: 4335896, // İtalya Serie A
+    51: 4335341, // İngiltere Premier Lig (Örnek)
+    140: 4305428, // İspanya La Liga (Örnek)
+    141: 4305853, // İtalya Serie A
+    136: 4331488, // İngiltere Premier Lig (Örnek)
+    78: 4306466, // İspanya La Liga (Örnek)
+    79: 4306784, // İtalya Serie A
+    61: 4303257, // İngiltere Premier Lig (Örnek)
+    62: 4303573, // İspanya La Liga (Örnek)
+    203: 4308542, // İtalya Serie A
+    204: 4309086, // İngiltere Premier Lig (Örnek)
+    205: 4310576, // İspanya La Liga (Örnek)
+    552: 4311155, // İtalya Serie A
+    88: 4296013, // İngiltere Premier Lig (Örnek)
+    145: 4299828, // İspanya La Liga (Örnek)
+    179: 4298401, // İtalya Serie A
+    94: 4309453, // İngiltere Premier Lig (Örnek)
+    188: 4378487, // İspanya La Liga (Örnek)
+    218: 4306996, // İspanya La Liga (Örnek)
+    207: 4427477, // İtalya Serie A
+    345: 4303257, // İngiltere Premier Lig (Örnek)
+    106: 4290707, // İspanya La Liga (Örnek)
+    286: 4294611, // İtalya Serie A
+    
+  };
 
-  print('📡 Mackolik verisi çekiliyor (ID: $testMackolikId)...');
-  String html = await _macFetchStandings(testMackolikId);
+  int basarili = 0;
+  int hatali = 0;
 
-  if (html.isEmpty || html.trim().length < 50) {
-    print('❌ HTML boş veya geçersiz. Mackolik ID ($testMackolikId) puan durumu olan bir maça ait olmayabilir.');
-    return;
-  }
+  print('📋 Toplam ${leaguesToUpdate.length} lig güncellenecek.\n');
 
-  print('✅ HTML başarıyla çekildi. Parse ediliyor...');
-  List<Map<String, dynamic>>? standingsList = _macTransformStandings(html);
+  for (final entry in leaguesToUpdate.entries) {
+    final leagueId = entry.key;
+    final mackolikId = entry.value;
 
-  if (standingsList != null) {
-    final formattedData = {
-      "get": "standings",
-      "parameters": {"league": testLeagueId.toString(), "season": testSeason.toString()},
-      "errors": [],
-      "results": 1,
-      "paging": {"current": 1, "total": 1},
-      "response": [
-        {
-          "league": {
-            "id": testLeagueId, "name": "Test League", "country": "Test Country",
-            "logo": "https://media.api-sports.io/football/leagues/$testLeagueId.png",
-            "flag": "", "season": testSeason,
-            "standings": [standingsList] // Dizi içinde dizi formatı
-          }
-        }
-      ]
-    };
-
-    print('🚀 Supabase "league_standings" tablosuna yazılıyor...');
+    print('📡 [Lig: $leagueId] Mackolik verisi çekiliyor (Maç ID: $mackolikId)...');
     
     try {
-      await sb.from('league_standings').upsert({
-        'league_id': testLeagueId,
-        'data': formattedData,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      }, onConflict: 'league_id');
-      
-      print('🎉 BAŞARILI! Veri Supabase tablosuna yazıldı. (League ID: $testLeagueId)');
+      String html = await _macFetchStandings(mackolikId);
+
+      if (html.isEmpty || html.trim().length < 50) {
+        print('  ❌ HTML boş veya geçersiz. Maç ID hatalı olabilir.');
+        hatali++;
+        continue;
+      }
+
+      List<Map<String, dynamic>>? standingsList = _macTransformStandings(html);
+
+      if (standingsList != null) {
+        final formattedData = {
+          "get": "standings",
+          "parameters": {"league": leagueId.toString(), "season": targetSeason.toString()},
+          "errors": [],
+          "results": 1,
+          "paging": {"current": 1, "total": 1},
+          "response": [
+            {
+              "league": {
+                "id": leagueId, 
+                "name": "League $leagueId", 
+                "country": "",
+                "logo": "https://media.api-sports.io/football/leagues/$leagueId.png",
+                "flag": "", 
+                "season": targetSeason,
+                "standings": [standingsList] // Dizi içinde dizi formatı
+              }
+            }
+          ]
+        };
+        
+        await sb.from('league_standings').upsert({
+          'league_id': leagueId,
+          'data': formattedData,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        }, onConflict: 'league_id');
+        
+        print('  🎉 BAŞARILI! Veri Supabase tablosuna yazıldı.');
+        basarili++;
+      } else {
+        print('  ❌ Puan durumu parse edilemedi.');
+        hatali++;
+      }
     } catch (e) {
-      print('❌ Supabase yazma hatası: $e');
+      print('  ❌ Beklenmeyen Hata: $e');
+      hatali++;
     }
-    
-  } else {
-    print('❌ Puan durumu parse edilemedi.');
+
+    // ÖNEMLİ: Mackolik bizi bot sanıp engellemesin (rate-limit) diye her lig arasına 2 saniye bekleme koyuyoruz.
+    await Future.delayed(const Duration(seconds: 2));
   }
+
+  print('\n🏁 İŞLEM TAMAMLANDI!');
+  print('✅ Başarılı: $basarili');
+  print('❌ Hatalı: $hatali');
+  exit(0);
 }
