@@ -284,7 +284,7 @@ void main() async {
 
   // ─── İŞLENECEK MAÇLAR ───
   final List<int> mackolikIds = [
-    4305437, // Senin belirttiğin maç ID'si
+    4308542, // Senin belirttiğin maç ID'si
   ];
 
   int basarili = 0;
