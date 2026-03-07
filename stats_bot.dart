@@ -61,7 +61,8 @@ double _teamSimilarity(String name1, String name2) {
 Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String apiKey) async {
   print('  🔍 [LOG] Mackolik maç sayfası inceleniyor... ID: $mackolikId');
   
-  final url = 'https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=${matchId';
+  // DİKKAT: Burası maçın genel bilgilerini (takım, tarih) almak için ANA SAYFAYA gitmeli!
+  final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
   print('  🔗 [LOG] İstek atılan URL: $url');
   
   final res = await http.get(Uri.parse(url), headers: _macHeaders).timeout(const Duration(seconds: 10));
@@ -132,6 +133,7 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
 
 // ─── 1. MACKOLİK STATS HTML FETCH (AJAX HANDLER) ───
 Future<String> _macFetchStats(int mackolikId) async {
+  // DİKKAT: İstatistik verisinin geldiği asıl AJAX URL'si burası!
   final url = 'https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=$mackolikId';
   try {
     final res = await http.get(Uri.parse(url), headers: {
@@ -150,7 +152,6 @@ List<Map<String, dynamic>>? _macTransformStatistics(String html, Map<String, dyn
   if (html.trim().length < 20) return null;
   if (html.trim().startsWith('{') || html.trim().startsWith('[')) return null;
 
-  // Regex'ler HTML tag değişikliklerine karşı daha esnek hale getirildi
   final homeValues = RegExp(r'team-1-statistics-text"[^>]*>\s*([^<]+)\s*<')
       .allMatches(html).map((m) => m.group(1)!.trim()).toList();
   final titles = RegExp(r'statistics-title-text"[^>]*>\s*([^<]+)\s*<')
@@ -208,10 +209,9 @@ void main() async {
 
   final sb = SupabaseClient(sbUrl, sbKey);
 
-  // ─── İŞLENECEK MAÇLAR (Örnek olarak bulduğunuz ID eklendi) ───
+  // ─── İŞLENECEK MAÇLAR ───
   final List<int> mackolikIds = [
-    4305437, // Bahsettiğiniz güncel id
-    // Buraya diğer maç ID'leri eklenebilir
+    4305437, // Senin belirttiğin maç ID'si
   ];
 
   int basarili = 0;
