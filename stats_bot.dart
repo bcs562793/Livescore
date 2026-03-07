@@ -61,7 +61,7 @@ double _teamSimilarity(String name1, String name2) {
 Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String apiKey) async {
   print('  🔍 [LOG] Mackolik maç sayfası inceleniyor... ID: $mackolikId');
   
-  final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
+  final url = 'https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=${matchId';
   print('  🔗 [LOG] İstek atılan URL: $url');
   
   final res = await http.get(Uri.parse(url), headers: _macHeaders).timeout(const Duration(seconds: 10));
