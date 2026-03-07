@@ -1,0 +1,6 @@
+name: test_scraper
+description: Standalone standings test
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  http: ^1.1.0
