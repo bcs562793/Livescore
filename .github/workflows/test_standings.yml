@@ -1,0 +1,25 @@
+name: Test Mackolik Standings Parser
+
+on:
+  push:
+    branches:
+      - main # Veya testi çalıştırdığın dal adı
+  workflow_dispatch: # Manuel tetiklemeye izin verir
+
+jobs:
+  test-parser:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install Dependencies
+        run: dart pub get
+
+      - name: Run Standings Test
+        run: dart test_standings.dart
