@@ -62,7 +62,7 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
   print('  🔍 [LOG] Mackolik maç sayfası inceleniyor... ID: $mackolikId');
   
   // DİKKAT: Burası maçın genel bilgilerini (takım, tarih) almak için ANA SAYFAYA gitmeli!
-  final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
+  final url = 'https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=$mackolikId';
   print('  🔗 [LOG] İstek atılan URL: $url');
   
   final res = await http.get(Uri.parse(url), headers: _macHeaders).timeout(const Duration(seconds: 10));
