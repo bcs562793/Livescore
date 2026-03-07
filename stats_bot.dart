@@ -60,35 +60,40 @@ double _teamSimilarity(String name1, String name2) {
 // ─── OTOMATİK API-FOOTBALL EŞLEŞTİRME ───
 Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String apiKey) async {
   print('  🔍 [LOG] Mackolik maç sayfası inceleniyor... ID: $mackolikId');
-  
+
   // DİKKAT: Burası maçın genel bilgilerini (takım, tarih) almak için ANA SAYFAYA gitmeli!
-  final url = 'https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=$mackolikId';
+  // optaStats sadece istatistik döndürür, ana sayfadan takım ve tarih bilgisi çekilmeli!
+  final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
   print('  🔗 [LOG] İstek atılan URL: $url');
-  
+
   final res = await http.get(Uri.parse(url), headers: _macHeaders).timeout(const Duration(seconds: 10));
   print('  📥 [LOG] Mackolik HTTP Status: ${res.statusCode}');
-  
-  final titleMatch = RegExp(r'<title>([^,]+),\s*(\d{1,2})\.(\d{1,2})\.(\d{4})').firstMatch(res.body);
-  
+
+  // Yeni format: "Athletic Bilbao - Barcelona (7.03.2026) Maç Detayı -..."
+  // Eski format: "Team1 - Team2, 15.03.2024"
+  // Her iki formatu da desteklemek için regex güncellendi
+  final titleMatch = RegExp(r'<title>([^<(]+?)\s*-\s*([^<(]+?)\s*\((\d{1,2})\.(\d{1,2})\.(\d{4})\)').firstMatch(res.body);
+
   if (titleMatch == null) {
     print('  ❌ [HATA] Beklenen tarih formatı Regex ile eşleşmedi!');
+    print('  🔍 [LOG] HTML başlığı kontrol ediliyor...');
+    final titleTag = RegExp(r'<title>([^<]+)</title>').firstMatch(res.body);
+    if (titleTag != null) {
+      print('  📝 [LOG] Bulunan title: ${titleTag.group(1)}');
+    }
     return null;
   }
-  
-  String teamsPart = titleMatch.group(1)!.trim(); 
-  final day = titleMatch.group(2)!.padLeft(2, '0');
-  final month = titleMatch.group(3)!.padLeft(2, '0');
-  final year = titleMatch.group(4)!;
+
+  // Yeni regex ile: group(1) = ev sahibi, group(2) = deplasman, group(3) = gün, group(4) = ay, group(5) = yıl
+  String macHome = titleMatch.group(1)!.trim();
+  String macAway = titleMatch.group(2)!.trim();
+  final day = titleMatch.group(3)!.padLeft(2, '0');
+  final month = titleMatch.group(4)!.padLeft(2, '0');
+  final year = titleMatch.group(5)!;
   final apiDate = '$year-$month-$day';
-  
+
   print('  📅 [LOG] Parse edilen tarih: $apiDate');
-  
-  teamsPart = teamsPart.replaceAll(RegExp(r'\s*\d+\s*-\s*\d+\s*'), ' - ');
-  
-  List<String> teamNames = teamsPart.contains(' vs ') ? teamsPart.split(' vs ') : teamsPart.split('-');
-  
-  String macHome = teamNames.isNotEmpty ? teamNames[0].trim() : '';
-  String macAway = teamNames.length > 1 ? teamNames[1].trim() : '';
+  print('  ⚽ [LOG] Takımlar: $macHome vs $macAway');
   
   print('  📡 [LOG] API-Football üzerinde aranıyor... (Tarih: $apiDate)');
   final apiRes = await http.get(
