@@ -56,49 +56,86 @@ double _teamSimilarity(String name1, String name2) {
 }
 
 // ─── OTOMATİK API-FOOTBALL EŞLEŞTİRME ───
+// ─── OTOMATİK API-FOOTBALL EŞLEŞTİRME ───
 Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String apiKey) async {
-  print('  🔍 Mackolik maç sayfası inceleniyor...');
+  print('  🔍 [LOG] Mackolik maç sayfası inceleniyor... ID: $mackolikId');
   
   final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-  final res = await http.get(Uri.parse(url), headers: _macHeaders).timeout(const Duration(seconds: 10));
+  print('  🔗 [LOG] İstek atılan URL: $url');
   
-  // HTML <title> etiketinden takımları ve maç tarihini Regex ile ayıkla
-  // Örn: <title>Fenerbahçe vs Galatasaray, 19.05.2024 ...
-  final titleMatch = RegExp(r'<title>\s*(.*?)\s*(?:vs|\s+-\s+|\d+\s*-\s*\d+)\s*(.*?),\s*(\d{2})\.(\d{2})\.(\d{4})').firstMatch(res.body);
+  final res = await http.get(Uri.parse(url), headers: _macHeaders).timeout(const Duration(seconds: 10));
+  print('  📥 [LOG] Mackolik HTTP Status: ${res.statusCode}');
+  
+  // Sitenin bizi engelleyip engellemediğini (Captcha vb.) görmek için body'nin ufak bir kısmını basalım
+  final bodySnippet = res.body.length > 150 ? res.body.substring(0, 150).replaceAll('\n', ' ') : res.body.replaceAll('\n', ' ');
+  print('  📄 [LOG] HTML Body Başlangıcı: $bodySnippet...');
+  
+  // Regex'ten bağımsız olarak sayfanın ham <title> etiketini her durumda ekrana basalım
+  final rawTitleMatch = RegExp(r'<title>(.*?)<\/title>').firstMatch(res.body);
+  final rawTitle = rawTitleMatch?.group(1) ?? 'TITLE_BULUNAMADI';
+  print('  🏷️ [LOG] Sayfadan okunan ham <title>: "$rawTitle"');
+  
+  // Esnek Regex: Başlığın sonundaki virgül ve tarihe odaklanır.
+  final titleMatch = RegExp(r'<title>([^,]+),\s*(\d{1,2})\.(\d{1,2})\.(\d{4})').firstMatch(res.body);
   
   if (titleMatch == null) {
-    print('  ❌ Başlık(title) bulunamadı. ID hatalı olabilir.');
+    print('  ❌ [HATA] Beklenen tarih formatı Regex ile eşleşmedi!');
     return null;
   }
   
-  final macHome = titleMatch.group(1)!.trim();
-  final macAway = titleMatch.group(2)!.trim();
-  final day = titleMatch.group(3)!;
-  final month = titleMatch.group(4)!;
-  final year = titleMatch.group(5)!;
+  String teamsPart = titleMatch.group(1)!.trim(); 
+  print('  🧩 [LOG] Regex Grup 1 (Takımlar/Skor kısmı): "$teamsPart"');
+  
+  final day = titleMatch.group(2)!.padLeft(2, '0');
+  final month = titleMatch.group(3)!.padLeft(2, '0');
+  final year = titleMatch.group(4)!;
   final apiDate = '$year-$month-$day';
   
-  print('  📅 Tarih ve Takımlar bulundu: $macHome vs $macAway ($apiDate)');
-  print('  📡 API-Football üzerinde aranıyor...');
+  print('  📅 [LOG] Parse edilen tarih: $day.$month.$year -> apiDate: $apiDate');
   
-  // API-Football'a o tarihteki maçları sor
+  // Skor temizliği öncesi ve sonrası logu
+  final beforeReplace = teamsPart;
+  teamsPart = teamsPart.replaceAll(RegExp(r'\s*\d+\s*-\s*\d+\s*'), ' - ');
+  print('  🔄 [LOG] Skor temizliği: "$beforeReplace" -> "$teamsPart"');
+  
+  // Takımları bölme işlemi logu
+  List<String> teamNames;
+  if (teamsPart.contains(' vs ')) {
+    teamNames = teamsPart.split(' vs ');
+    print('  ✂️ [LOG] " vs " ifadesine göre bölündü.');
+  } else {
+    teamNames = teamsPart.split('-');
+    print('  ✂️ [LOG] "-" işaretine göre bölündü.');
+  }
+  
+  print('  📦 [LOG] Bölünen dizi: $teamNames (Eleman sayısı: ${teamNames.length})');
+  
+  String macHome = teamNames.isNotEmpty ? teamNames[0].trim() : '';
+  String macAway = teamNames.length > 1 ? teamNames[1].trim() : '';
+  
+  print('  🏠 [LOG] Çıkarılan Ev Sahibi: "$macHome"');
+  print('  🚌 [LOG] Çıkarılan Deplasman: "$macAway"');
+  
+  print('  📡 [LOG] API-Football üzerinde aranıyor... (Tarih: $apiDate)');
   final apiRes = await http.get(
     Uri.parse('https://v3.football.api-sports.io/fixtures?date=$apiDate'),
     headers: {'x-apisports-key': apiKey}
   ).timeout(const Duration(seconds: 15));
   
+  print('  📥 [LOG] API-Football HTTP Status: ${apiRes.statusCode}');
+  
   if (apiRes.statusCode != 200) {
-    print('  ❌ API-Football isteği başarısız: HTTP ${apiRes.statusCode}');
+    print('  ❌ [HATA] API-Football isteği başarısız!');
     return null;
   }
   
   final apiData = jsonDecode(apiRes.body);
   final fixtures = apiData['response'] as List? ?? [];
+  print('  ⚽ [LOG] API-Football bu tarihte ${fixtures.length} maç döndürdü.');
   
   Map<String, dynamic>? bestMatch;
   double bestScore = 0;
   
-  // Bulunan tüm maçlar arasında takım isimlerini eşleştir
   for (final fixture in fixtures) {
     final teams = fixture['teams'];
     final apiHome = teams['home']['name'];
@@ -108,19 +145,20 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
     final awaySim = _teamSimilarity(macAway, apiAway);
     final combined = (homeSim + awaySim) / 2;
     
-    // Yüzde 65 ve üzeri benzerliği olan en iyi sonucu al
+    // Potansiyel yüksek eşleşmeleri logla
     if (combined > bestScore && homeSim >= 0.5 && awaySim >= 0.5) {
       bestScore = combined;
       bestMatch = fixture;
+      print('  ⭐ [LOG] Yeni en iyi eşleşme adayı: $apiHome vs $apiAway -> Benzerlik: ${(combined * 100).toStringAsFixed(1)}%');
     }
   }
   
   if (bestMatch != null && bestScore >= 0.65) {
-    print('  ✅ API-Football ile eşleşti! Fixture ID: ${bestMatch['fixture']['id']} (${(bestScore * 100).toStringAsFixed(0)}% benzerlik)');
+    print('  ✅ [BAŞARILI] API-Football ile eşleşti! Fixture ID: ${bestMatch['fixture']['id']} (${(bestScore * 100).toStringAsFixed(0)}% benzerlik)');
     return bestMatch;
   }
   
-  print('  ❌ API-Football tarafında $apiDate tarihinde uygun eşleşme bulunamadı.');
+  print('  ❌ [HATA] API-Football tarafında uygun eşleşme bulunamadı. (En yüksek skor: ${(bestScore * 100).toStringAsFixed(1)}%)');
   return null;
 }
 
