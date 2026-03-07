@@ -3,8 +3,8 @@ name: Test Mackolik Standings Parser
 on:
   push:
     branches:
-      - main # Veya testi çalıştırdığın dal adı
-  workflow_dispatch: # Manuel tetiklemeye izin verir
+      - main
+  workflow_dispatch:
 
 jobs:
   test-parser:
@@ -18,8 +18,13 @@ jobs:
         with:
           sdk: stable
 
+      # 1. ADIM: Paketleri indir (Eksik olan kısım buydu veya atlanmıştı)
       - name: Install Dependencies
         run: dart pub get
 
+      # 2. ADIM: Kodu çalıştır
       - name: Run Standings Test
-        run: dart test_standings.dart
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: dart run test_standings.dart
