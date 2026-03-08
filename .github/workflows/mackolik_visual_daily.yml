@@ -1,0 +1,27 @@
+name: Mackolik Visual Daily Sync
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # Her gün 21:01 UTC (00:01 Türkiye)
+  workflow_dispatch:        # Manuel tetikleme
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Install dependencies
+        run: dart pub get
+
+      - name: Run daily visual sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: dart run mackolik_visual_daily.dart
