@@ -169,35 +169,26 @@ void main() async {
     print('   🔍 İlk eleman: ${rawList[0]}');
   }
 
-  // Nested olabilir — düzleştir
-  final rawMatches = <Map>[];
+  // Her eleman bir List: [0]=id, [2]=home, [4]=away
+  final mackolikMatches = <Map<String, dynamic>>[];
   for (final item in rawList) {
-    if (item is Map) {
-      rawMatches.add(item);
-    } else if (item is List) {
-      // İçindeki her eleman bir maç olabilir
-      for (final sub in item) {
-        if (sub is Map) rawMatches.add(sub);
+    if (item is List && item.length >= 5) {
+      final id = item[0];
+      final home = item[2]?.toString() ?? '';
+      final away = item[4]?.toString() ?? '';
+      if (id != null && home.isNotEmpty && away.isNotEmpty) {
+        mackolikMatches.add({
+          'id': id is int ? id : int.tryParse(id.toString()),
+          'home': home,
+          'away': away,
+        });
       }
     }
   }
-  print('   ${rawMatches.length} raw maç bulundu');
-  if (rawMatches.isNotEmpty) {
-    print('   🔍 İlk maç keys: ${rawMatches[0].keys.toList()}');
-    print('   🔍 İlk maç: ${rawMatches[0]}');
-  }
-
-  // Mackolik match listesini parse et
-  final mackolikMatches = <Map<String, dynamic>>[];
-  for (final m in rawMatches) {
-    final id = m['id']?.toString() ?? m['i']?.toString() ?? m['mid']?.toString();
-    final home = (m['h'] ?? m['ht'] ?? m['home'] ?? m['hname'] ?? '').toString();
-    final away = (m['a'] ?? m['at'] ?? m['away'] ?? m['aname'] ?? '').toString();
-    if (id != null && home.isNotEmpty && away.isNotEmpty) {
-      mackolikMatches.add({'id': int.tryParse(id), 'home': home, 'away': away});
-    }
-  }
   print('   ${mackolikMatches.length} parse edilebilir maç\n');
+  if (mackolikMatches.isNotEmpty) {
+    print('   🔍 Örnek: ${mackolikMatches[0]}');
+  }
 
   // ── 3. Supabase'den bugünün live_matches'ini çek ──────────────────────────
   print('📡 Supabase live_matches çekiliyor...');
