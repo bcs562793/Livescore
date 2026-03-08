@@ -10,7 +10,7 @@ jobs:
 
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 'stable'
+          channel: 'stable'
 
       - name: Bağımlılıkları yükle
         run: flutter pub get
