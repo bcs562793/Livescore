@@ -18,5 +18,5 @@ jobs:
       - name: Mackolik Visual URL Testi
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: dart run mackolik_visual_test.dart
