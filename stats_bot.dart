@@ -219,9 +219,34 @@ void main() async {
 
   final sb = SupabaseClient(sbUrl, sbKey);
 
-  final List<int> mackolikIds = [
-    4418303,
-  ];
+  // Mackolik ID'lerini calistirmadan once sor
+  // Tek ID: 4418306  |  Birden fazla: 4418306,4418307
+  stdout.write('\n📝 Mackolik ID gir (virgülle ayır): ');
+  final rawInput = stdin.readLineSync()?.trim() ?? '';
+
+  if (rawInput.isEmpty) {
+    print('❌ ID girilmedi, çıkılıyor.');
+    exit(1);
+  }
+
+  final List<int> mackolikIds = rawInput
+      .split(',')
+      .map((s) => s.trim())
+      .where((s) => s.isNotEmpty)
+      .map((s) {
+        final n = int.tryParse(s);
+        if (n == null) print('  ⚠️  "$s" geçerli ID değil, atlanıyor.');
+        return n;
+      })
+      .whereType<int>()
+      .toList();
+
+  if (mackolikIds.isEmpty) {
+    print('❌ Geçerli ID bulunamadı, çıkılıyor.');
+    exit(1);
+  }
+
+  print('✅ ${mackolikIds.length} ID alındı: $mackolikIds\n');
 
   int basarili = 0, hatali = 0;
   print('📋 ${mackolikIds.length} maç işlenecek.\n');
