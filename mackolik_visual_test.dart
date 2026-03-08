@@ -8,108 +8,87 @@ final _headers = {
   'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8',
 };
 
-class VisualData {
-  final String iframeUrl;
-  final String token;
-  final DateTime expiry;
+Future<void> scanPage(int mackolikId) async {
+  final urls = [
+    'https://www.mackolik.com/mac/$mackolikId/',
+    'https://arsiv.mackolik.com/Mac/$mackolikId/',
+  ];
 
-  VisualData({required this.iframeUrl, required this.token, required this.expiry});
+  for (final url in urls) {
+    print('\n🔗 $url');
+    try {
+      final response = await http.get(Uri.parse(url), headers: {
+        ..._headers,
+        'Referer': url.contains('arsiv')
+            ? 'https://arsiv.mackolik.com/'
+            : 'https://www.mackolik.com/',
+      }).timeout(const Duration(seconds: 15));
 
-  bool get isValid => DateTime.now().isBefore(expiry.subtract(const Duration(minutes: 5)));
-}
+      print('📡 ${response.statusCode}');
+      if (response.statusCode != 200) continue;
 
-Future<VisualData?> getVisualData(int mackolikId) async {
-  final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-  print('🔗 Fetching: $url');
+      final body = response.body;
 
-  try {
-    final response = await http.get(Uri.parse(url), headers: {
-      ..._headers,
-      'Referer': 'https://arsiv.mackolik.com/',
-    }).timeout(const Duration(seconds: 15));
-
-    print('📡 Status: ${response.statusCode}');
-    if (response.statusCode != 200) return null;
-
-    final document = parse(response.body);
-    final iframes = document.querySelectorAll('iframe');
-
-    for (final iframe in iframes) {
-      var src = iframe.attributes['src'] ?? '';
-      if (!src.contains('performgroup') && !src.contains('visualisation')) continue;
-
-      // // ile başlıyorsa https: ekle
-      if (src.startsWith('//')) src = 'https:$src';
-
-      // & işaretini düzelt
-      src = src.replaceAll('&amp;', '&');
-
-      print('✅ Visual iframe bulundu');
-
-      final uri = Uri.parse(src);
-      final token = uri.queryParameters['token'];
-      if (token == null) {
-        print('⚠️ Token yok');
-        return null;
+      // 1. Ham HTML'de performgroup ara
+      if (body.contains('performgroup')) {
+        print('✅ HTML içinde "performgroup" bulundu!');
+        // Etrafındaki 500 karakteri göster
+        final idx = body.indexOf('performgroup');
+        final start = (idx - 200).clamp(0, body.length);
+        final end = (idx + 300).clamp(0, body.length);
+        print('📄 Bağlam:\n${body.substring(start, end)}');
+      } else {
+        print('❌ HTML içinde "performgroup" yok');
       }
 
-      // JWT decode
-      final parts = token.split('.');
-      if (parts.length != 3) {
-        print('⚠️ Geçersiz JWT formatı');
-        return null;
+      // 2. Token ara
+      if (body.contains('token=')) {
+        print('\n✅ "token=" bulundu!');
+        final idx = body.indexOf('token=');
+        final end = (idx + 200).clamp(0, body.length);
+        print('📄 Token bağlamı: ${body.substring(idx, end)}');
       }
 
-      final payload = jsonDecode(
-        utf8.decode(base64Url.decode(base64.normalize(parts[1])))
-      ) as Map<String, dynamic>;
-
-      print('📦 Payload: $payload');
-
-      final exp = payload['exp'] as int?;
-      if (exp == null) {
-        print('⚠️ exp alanı yok');
-        return null;
+      // 3. csb ara
+      if (body.contains('/csb/')) {
+        print('\n✅ "/csb/" bulundu!');
+        final idx = body.indexOf('/csb/');
+        final start = (idx - 100).clamp(0, body.length);
+        final end = (idx + 200).clamp(0, body.length);
+        print('📄 CSB bağlamı:\n${body.substring(start, end)}');
       }
 
-      final expiry = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
-      final remaining = expiry.difference(DateTime.now());
+      // 4. Tüm script tag'lerinde ara
+      final document = parse(body);
+      final scripts = document.querySelectorAll('script');
+      print('\n📜 ${scripts.length} script tag:');
+      for (int i = 0; i < scripts.length; i++) {
+        final text = scripts[i].text;
+        final src = scripts[i].attributes['src'] ?? '';
+        if (text.contains('visual') || text.contains('token') || text.contains('csb') ||
+            src.contains('visual') || src.contains('matchcast')) {
+          print('  script[$i] src=$src snippet=${text.substring(0, text.length.clamp(0, 150))}');
+        }
+      }
 
-      print('⏱ Token süresi: $expiry (${remaining.inMinutes} dakika kaldı)');
-      print(remaining.isNegative ? '❌ Token SÜRESI DOLMUŞ' : '✅ Token GEÇERLİ');
-      print('🔗 Full URL: $src');
-
-      return VisualData(iframeUrl: src, token: token, expiry: expiry);
+    } catch (e) {
+      print('❌ $e');
     }
-
-    print('❌ performgroup iframe bulunamadı');
-    return null;
-  } catch (e) {
-    print('❌ Hata: $e');
-    return null;
   }
 }
 
 void main() async {
-  print('🚀 Mackolik Visual Token Test\n');
+  print('🚀 Mackolik Ham HTML Tarama\n');
 
-  // Canlı maç ID'leri buraya — worker loglarından al
-  final testMatches = [
-    // {'id': CANLI_MACKOLIK_ID, 'name': 'Maç Adı'},
-    {'id': 4314542, 'name': 'FC Orenburg vs Zenit (canlı test)'},
+  final ids = [
+    4314542, // FC Orenburg vs Zenit
   ];
 
-  for (final match in testMatches) {
+  for (final id in ids) {
     print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    print('🏟 ${match['name']}');
-    final data = await getVisualData(match['id'] as int);
-    if (data != null) {
-      print('🎯 BAŞARILI — Token ${data.isValid ? "geçerli" : "geçersiz"}');
-    } else {
-      print('🎯 BAŞARISIZ');
-    }
-    print('');
+    print('🏟 Mackolik ID: $id');
+    await scanPage(id);
   }
 
-  print('✅ Test tamamlandı.');
+  print('\n✅ Tarama tamamlandı.');
 }
