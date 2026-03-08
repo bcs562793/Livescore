@@ -158,19 +158,40 @@ void main() async {
     exit(1);
   }
 
-  final mackolikData = jsonDecode(mackolikResp.body);
+  final mackolikData = jsonDecode(mackolikResp.body) as Map;
+  print('   🔍 Top-level keys: ${mackolikData.keys.toList()}');
 
-  // Mackolik livedata format: { "d": [ {...match...}, ... ] }
-  // Her maçta: id, h (home), a (away), hid, aid alanları var
-  final rawMatches = (mackolikData['d'] as List?) ?? [];
-  print('   ${rawMatches.length} mackolik maç bulundu\n');
+  // Tüm maçları topla — hem düz liste hem nested yapı
+  final rawTop = (mackolikData['d'] as List?) ?? [];
+  if (rawTop.isNotEmpty) {
+    final first = rawTop[0] as Map;
+    print('   🔍 d[0] keys: ${first.keys.toList()}');
+    print('   🔍 d[0]: $first');
+  }
+
+  final rawMatches = <Map>[];
+  for (final item in rawTop) {
+    final map = item as Map;
+    if (map.containsKey('m') && map['m'] is List) {
+      for (final match in map['m'] as List) rawMatches.add(match as Map);
+    } else if (map.containsKey('matches') && map['matches'] is List) {
+      for (final match in map['matches'] as List) rawMatches.add(match as Map);
+    } else {
+      rawMatches.add(map);
+    }
+  }
+  print('   ${rawMatches.length} raw maç bulundu');
+  if (rawMatches.isNotEmpty) {
+    print('   🔍 İlk maç keys: ${rawMatches[0].keys.toList()}');
+    print('   🔍 İlk maç: ${rawMatches[0]}');
+  }
 
   // Mackolik match listesini parse et
   final mackolikMatches = <Map<String, dynamic>>[];
   for (final m in rawMatches) {
-    final id = m['id']?.toString() ?? m['i']?.toString();
-    final home = m['h'] as String? ?? m['ht'] as String? ?? '';
-    final away = m['a'] as String? ?? m['at'] as String? ?? '';
+    final id = m['id']?.toString() ?? m['i']?.toString() ?? m['mid']?.toString();
+    final home = (m['h'] ?? m['ht'] ?? m['home'] ?? m['hname'] ?? '').toString();
+    final away = (m['a'] ?? m['at'] ?? m['away'] ?? m['aname'] ?? '').toString();
     if (id != null && home.isNotEmpty && away.isNotEmpty) {
       mackolikMatches.add({'id': int.tryParse(id), 'home': home, 'away': away});
     }
@@ -181,14 +202,10 @@ void main() async {
   print('📡 Supabase live_matches çekiliyor...');
   // match_date yok — visual_url'si null olan TÜM maçları al
   // (live_matches zaten bugünün+yakın maçları tutuyor)
-  final startOfDay = DateTime.utc(now.year, now.month, now.day).toIso8601String();
-  final endOfDay = DateTime.utc(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
-
   final dbMatches = await supabase
-    .from('live_matches')
-    .select('fixture_id, home_team, away_team, visual_url')
-    .gte('updated_at', startOfDay)
-    .lte('updated_at', endOfDay);
+      .from('live_matches')
+      .select('fixture_id, home_team, away_team, visual_url')
+      .or('visual_url.is.null,visual_url.eq.');
 
   print('   ${(dbMatches as List).length} Supabase maç bulundu\n');
 
@@ -208,6 +225,11 @@ void main() async {
     final awayTeam = dbMatch['away_team'] as String? ?? '';
     final existingUrl = dbMatch['visual_url'] as String?;
 
+    // Zaten visual_url varsa atla
+    if (existingUrl != null && existingUrl.isNotEmpty) {
+      skipped++;
+      continue;
+    }
 
     // En iyi eşleşmeyi bul
     double bestScore = 0.0;
