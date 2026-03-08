@@ -162,8 +162,25 @@ void main() async {
   print('   🔍 Top-level keys: ${mackolikData.keys.toList()}');
 
   // m direkt maç listesi
-  final rawMatches = (mackolikData['m'] as List? ?? mackolikData['d'] as List? ?? [])
-      .cast<Map>();
+  final rawList = (mackolikData['m'] as List? ?? mackolikData['d'] as List? ?? []);
+  print('   ${rawList.length} raw eleman bulundu');
+  if (rawList.isNotEmpty) {
+    print('   🔍 İlk eleman tipi: ${rawList[0].runtimeType}');
+    print('   🔍 İlk eleman: ${rawList[0]}');
+  }
+
+  // Nested olabilir — düzleştir
+  final rawMatches = <Map>[];
+  for (final item in rawList) {
+    if (item is Map) {
+      rawMatches.add(item);
+    } else if (item is List) {
+      // İçindeki her eleman bir maç olabilir
+      for (final sub in item) {
+        if (sub is Map) rawMatches.add(sub);
+      }
+    }
+  }
   print('   ${rawMatches.length} raw maç bulundu');
   if (rawMatches.isNotEmpty) {
     print('   🔍 İlk maç keys: ${rawMatches[0].keys.toList()}');
