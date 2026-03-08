@@ -162,7 +162,7 @@ void main() async {
   print('   🔍 Top-level keys: ${mackolikData.keys.toList()}');
 
   // Tüm maçları topla — hem düz liste hem nested yapı
-  final rawTop = (mackolikData['d'] as List?) ?? [];
+  final rawTop = (mackolikData['m'] as List?) ?? (mackolikData['d'] as List?) ?? [];
   if (rawTop.isNotEmpty) {
     final first = rawTop[0] as Map;
     print('   🔍 d[0] keys: ${first.keys.toList()}');
