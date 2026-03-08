@@ -124,10 +124,6 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
 
 
 
-  // DİKKAT: Burası maçın genel bilgilerini (takım, tarih) almak için ANA SAYFAYA gitmeli!
-
-  // optaStats sadece istatistik döndürür, ana sayfadan takım ve tarih bilgisi çekilmeli!
-
   final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
 
   print('  🔗 [LOG] İstek atılan URL: $url');
@@ -140,12 +136,6 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
 
 
 
-  // Yeni format: "Athletic Bilbao - Barcelona (7.03.2026) Maç Detayı -..."
-
-  // Eski format: "Team1 - Team2, 15.03.2024"
-
-  // Her iki formatu da desteklemek için regex güncellendi
-
   final titleMatch = RegExp(r'<title>([^<(]+?)\s*-\s*([^<(]+?)\s*\((\d{1,2})\.(\d{1,2})\.(\d{4})\)').firstMatch(res.body);
 
 
@@ -154,23 +144,11 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
 
     print('  ❌ [HATA] Beklenen tarih formatı Regex ile eşleşmedi!');
 
-    print('  🔍 [LOG] HTML başlığı kontrol ediliyor...');
-
-    final titleTag = RegExp(r'<title>([^<]+)</title>').firstMatch(res.body);
-
-    if (titleTag != null) {
-
-      print('  📝 [LOG] Bulunan title: ${titleTag.group(1)}');
-
-    }
-
     return null;
 
   }
 
 
-
-  // Yeni regex ile: group(1) = ev sahibi, group(2) = deplasman, group(3) = gün, group(4) = ay, group(5) = yıl
 
   String macHome = titleMatch.group(1)!.trim();
 
@@ -274,11 +252,9 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(int mackolikId, String ap
 
 
 
-// ─── 1. MACKOLİK STATS HTML FETCH (AJAX HANDLER) ───
+// ─── 1. MACKOLİK STATS HTML FETCH ───
 
 Future<String> _macFetchStats(int mackolikId) async {
-
-  // DİKKAT: İstatistik verisinin geldiği asıl AJAX URL'si burası!
 
   final url = 'https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=$mackolikId';
 
@@ -306,11 +282,9 @@ Future<String> _macFetchStats(int mackolikId) async {
 
 
 
-// ─── 2. TRANSFORM FONKSİYONU ───
+// ─── 2. TRANSFORM FONKSİYONU (FIREBASE FORMATI) ───
 
-// Mackolik optaStats düz metin döndürür: "değer\tbaşlık\tdeğer\tbaşlık..."
-
-// API-Football formatına dönüştür: [{"team": {...}, "statistics": [{type, value}, ...]}]
+// Firebase formatına dönüştür: [{type: '...', homeVal: ..., awayVal: ...}]
 
 List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dynamic> teams) {
 
@@ -320,10 +294,6 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
 
 
 
-  // Mackolik formatı: sırasıyla ev sahibi değeri, başlık, deplasman değeri, başlık...
-
-  // Örnek: "%77\nTopla Oynama\n%23\n6\nToplam Şut\n7\n..."
-
   final lines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
 
 
@@ -332,29 +302,19 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
 
 
 
-  final homeStats = <Map<String, dynamic>>[];
-
-  final awayStats = <Map<String, dynamic>>[];
-
-
-
-  // İlk satır genellikle "İstatistikler" başlığıdır, atla
+  final stats = <Map<String, dynamic>>[];
 
   int startIndex = lines[0].contains('İstatistikler') ? 1 : 0;
 
 
 
-  // Mackolik'te sıra: evdeğer, başlık, deplasman değeri, başlık...
-
-  // Yani 4'lü gruplar halinde: [homeVal, title, awayVal, title, ...]
-
   for (int i = startIndex; i + 2 < lines.length; i += 3) {
 
-    final awayValue = lines[i];       // Deplasman değeri
+    final awayValue = lines[i];
 
-    final title = lines[i + 1];       // İstatistik adı
+    final title = lines[i + 1];
 
-    final homeValue = lines[i + 2];  // Ev sahibi değeri
+    final homeValue = lines[i + 2];
 
 
 
@@ -362,21 +322,17 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
 
 
 
-    // Başlığı İngilizce'ye çevir
-
     final titleEN = _statsNameMap[title] ?? _statsNameMap[title.replaceAll('(%)', '').trim()] ?? title;
 
 
-
-    // Değeri formatla
 
     dynamic fmtVal(String raw) {
 
       raw = raw.trim();
 
-      if (raw.startsWith('%')) return raw; // "%77" şeklinde kalır
+      if (raw.startsWith('%')) return raw;
 
-      if (raw.contains('/')) return raw;   // "1/10" şeklinde kalır
+      if (raw.contains('/')) return raw;
 
       final n = int.tryParse(raw);
 
@@ -384,25 +340,27 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
 
     }
 
+    // Firebase formatı: homeVal ve awayVal ayrı alanlarda
 
+    stats.add(<String, dynamic>{
 
-    homeStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(homeValue)});
+      'type': titleEN,
 
-    awayStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(awayValue)});
+      'homeVal': fmtVal(homeValue),
+
+      'awayVal': fmtVal(awayValue),
+
+    });
 
   }
 
 
 
-  if (homeStats.isEmpty || awayStats.isEmpty) {
+  if (stats.isEmpty) {
 
     print('  ⚠️ [UYARI] Parse edilen istatistik bulunamadı, alternatif yöntem deneniyor...');
 
 
-
-    // Alternatif: Her satırı tek tek dene
-
-    // Format: değer\tdeğer\tbaşlık veya başlık\tdeğer\tdeğer
 
     final altLines = text.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty && !l.contains('İstatistikler')).toList();
 
@@ -417,8 +375,6 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
       final line3 = altLines[i + 2];
 
 
-
-      // Başlık hangisinde?
 
       String? title;
 
@@ -476,13 +432,17 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
 
 
 
-      // Tekrarlanmayı kontrol et
+      if (!stats.any((s) => s['type'] == titleEN)) {
 
-      if (!homeStats.any((s) => s['type'] == titleEN)) {
+        stats.add(<String, dynamic>{
 
-        homeStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(homeVal)});
+          'type': titleEN,
 
-        awayStats.add(<String, dynamic>{'type': titleEN, 'value': fmtVal(awayVal)});
+          'homeVal': fmtVal(homeVal),
+
+          'awayVal': fmtVal(awayVal),
+
+        });
 
       }
 
@@ -492,39 +452,19 @@ List<Map<String, dynamic>>? _macTransformStatistics(String text, Map<String, dyn
 
 
 
-  if (homeStats.isEmpty) return null;
+  if (stats.isEmpty) return null;
 
 
 
-  print('  📊 [LOG] ${homeStats.length} istatistik başlığı işlendi.');
+  print('  📊 [LOG] ${stats.length} istatistik başlığı işlendi.');
 
 
 
-  return [
-
-    {
-
-      'team': {'id': teams['home']?['id'], 'name': teams['home']?['name'] ?? '', 'logo': teams['home']?['logo'] ?? ''},
-
-      'statistics': homeStats
-
-    },
-
-    {
-
-      'team': {'id': teams['away']?['id'], 'name': teams['away']?['name'] ?? '', 'logo': teams['away']?['logo'] ?? ''},
-
-      'statistics': awayStats
-
-    },
-
-  ];
+  return stats;
 
 }
 
 
-
-// Yardımcı: Sayı mı kontrolü
 
 bool _isNumeric(String str) {
 
@@ -552,7 +492,7 @@ void main() async {
 
   if (sbUrl.isEmpty || sbKey.isEmpty || apiKey.isEmpty) {
 
-    print('❌ [HATA] Ortam değişkenleri (Environment Variables) eksik!');
+    print('❌ [HATA] Ortam değişkenleri eksik!');
 
     print('Gerekenler: SUPABASE_URL, SUPABASE_KEY, API_FOOTBALL_KEY');
 
@@ -566,11 +506,9 @@ void main() async {
 
 
 
-  // ─── İŞLENECEK MAÇLAR ───
-
   final List<int> mackolikIds = [
 
-    4418306, // Senin belirttiğin maç ID'si
+    4418306,
 
   ];
 
@@ -594,8 +532,6 @@ void main() async {
 
     
 
-    // 1. API-Football Eşleşmesini Bul
-
     final apiMatch = await _getApiFootballMatchInfo(mackolikId, apiKey);
 
     
@@ -616,8 +552,6 @@ void main() async {
 
 
 
-    // 2. Mackolik İstatistiklerini Çek
-
     print('  📊 Mackolik istatistikleri çekiliyor...');
 
     final statsHtml = await _macFetchStats(mackolikId);
@@ -635,8 +569,6 @@ void main() async {
     }
 
 
-
-    // 3. Veriyi API-Sports Formatına Çevir
 
     final statsData = _macTransformStatistics(statsHtml, teams);
 
@@ -662,15 +594,13 @@ void main() async {
 
 
 
-      // Pretty print JSON for debugging
-
       final encoder = JsonEncoder.withIndent('  ');
 
       print('\n');
 
       print('═══════════════════════════════════════════════════════════');
 
-      print('🔍 [DEBUG] SUPABASE\'E YAZILACAK JSON VERİSİ');
+      print('🔍 [DEBUG] SUPABASE\'E YAZILACAK JSON VERİSİ (FIREBASE FORMATI)');
 
       print('═══════════════════════════════════════════════════════════');
 
@@ -711,8 +641,6 @@ void main() async {
     }
 
 
-
-    // Rate-limit'e takılmamak için bekleme süresi
 
     await Future.delayed(const Duration(seconds: 2));
 
