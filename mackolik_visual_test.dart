@@ -1,16 +1,27 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:supabase/supabase.dart';
 
-class CookieClient {
+// ─── Supabase config ───────────────────────────────────────────────
+const supabaseUrl = 'YOUR_SUPABASE_URL';
+const supabaseKey = 'YOUR_SUPABASE_ANON_KEY';
+const testFixtureId = 1400190; // FC Orenburg vs Zenit — API-Football fixture ID
+const testMackolikId = 4314542; // Mackolik ID
+// ───────────────────────────────────────────────────────────────────
+
+class _CookieClient {
   final Map<String, String> _cookies = {};
   final _client = http.Client();
 
-  Future<http.Response> get(String url, {Map<String, String>? extra}) async {
-    final cookieHeader = _cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
+  Future<http.Response> get(String url,
+      {String? referer, Map<String, String>? extra}) async {
+    final cookieHeader =
+        _cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
     final response = await _client.get(Uri.parse(url), headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept-Language': 'tr-TR,tr;q=0.9',
       if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
+      if (referer != null) 'Referer': referer,
       ...?extra,
     });
     final setCookie = response.headers['set-cookie'];
@@ -26,100 +37,94 @@ class CookieClient {
   void close() => _client.close();
 }
 
-/// Mackolik sayfasından performgroup rbid'yi çek
-Future<String?> getRbid(CookieClient client, int mackolikId) async {
-  final pageUrl = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-  final page = await client.get(pageUrl, extra: {'Referer': 'https://arsiv.mackolik.com/'});
-  if (page.statusCode != 200) return null;
-
-  final body = page.body;
-
-  // getMatchCast(rbid, width) çağrısını bul
-  final call = RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body);
-  if (call != null) {
-    print('✅ getMatchCast rbid: ${call.group(1)}');
-    return call.group(1);
-  }
-
-  // tokenURI içindeki rbid= parametresini bul
-  final uri = RegExp(r'rbid=(\d+)').firstMatch(body);
-  if (uri != null) {
-    print('✅ tokenURI rbid: ${uri.group(1)}');
-    return uri.group(1);
-  }
-
-  // Debug — getMatchCast etrafı
-  if (body.contains('getMatchCast')) {
-    final idx = body.indexOf('getMatchCast');
-    print('📄 getMatchCast:\n${body.substring((idx-50).clamp(0, body.length), (idx+300).clamp(0, body.length))}');
-  } else {
-    print('⚠️ getMatchCast yok — isMatchCastEnabled kontrol:');
-    if (body.contains('isMatchCastEnabled')) {
-      final idx = body.indexOf('isMatchCastEnabled');
-      print(body.substring(idx, (idx+300).clamp(0, body.length)));
-    }
-  }
-
-  return null;
-}
-
-/// Token al ve minimal URL döndür
-Future<String?> getVisualUrl(int mackolikId) async {
-  final client = CookieClient();
+Future<String?> fetchVisualUrl(int mackolikId) async {
+  final client = _CookieClient();
   try {
-    await client.get('https://arsiv.mackolik.com/', extra: {'Referer': 'https://www.google.com/'});
+    // 1. Session başlat
+    await client.get('https://arsiv.mackolik.com/',
+        referer: 'https://www.google.com/');
 
+    // 2. Maç sayfası
     final pageUrl = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-    final rbid = await getRbid(client, mackolikId);
+    final page = await client.get(pageUrl,
+        referer: 'https://arsiv.mackolik.com/');
+    if (page.statusCode != 200) {
+      print('❌ Sayfa ${page.statusCode}');
+      return null;
+    }
+
+    // 3. rbid
+    final body = page.body;
+    final call = RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body);
+    final uri  = RegExp(r'rbid=(\d+)').firstMatch(body);
+    final rbid = call?.group(1) ?? uri?.group(1);
     if (rbid == null) { print('❌ rbid bulunamadı'); return null; }
+    print('📋 rbid: $rbid');
 
-    final token = await _fetchToken(client, rbid, pageUrl);
-    if (token == null) return null;
+    // 4. Token
+    final tokenUrl = 'https://visualisation.performgroup.com/getToken'
+        '?rbid=$rbid&customerId=mackolikWeb';
+    final tokenResp = await client.get(tokenUrl,
+        referer: pageUrl,
+        extra: {
+          'Origin': 'https://arsiv.mackolik.com',
+          'X-Requested-With': 'XMLHttpRequest',
+          'Accept': 'text/plain, */*; q=0.01',
+        });
 
-    // Minimal URL — sadece token yeterli
+    final token = tokenResp.body.trim();
+    print('📡 Token status: ${tokenResp.statusCode} | length: ${token.length}');
+
+    if (token.contains('<errors>') || token.length < 20) {
+      print('❌ Token hatası: $token');
+      return null;
+    }
+
+    // 5. JWT exp
+    DateTime? expiresAt;
+    final parts = token.split('.');
+    if (parts.length == 3) {
+      try {
+        final payload = jsonDecode(
+          utf8.decode(base64Url.decode(base64.normalize(parts[1])))
+        ) as Map;
+        final exp = payload['exp'] as int?;
+        if (exp != null) {
+          expiresAt = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+          print('⏱ Token: ${expiresAt.difference(DateTime.now()).inMinutes} dk geçerli');
+        }
+      } catch (_) {}
+    }
+
     return 'https://visualisation.performgroup.com/csb/index.html?token=$token';
   } finally {
     client.close();
   }
 }
 
-Future<String?> _fetchToken(CookieClient client, String rbid, String pageUrl) async {
-  final tokenUrl = 'https://visualisation.performgroup.com/getToken?rbid=$rbid&customerId=mackolikWeb';
-  print('🔑 $tokenUrl');
-
-  final resp = await client.get(tokenUrl, extra: {
-    'Referer': pageUrl,
-    'Origin': 'https://arsiv.mackolik.com',
-    'X-Requested-With': 'XMLHttpRequest',
-    'Accept': 'text/plain, */*; q=0.01',
-  });
-
-  print('📡 ${resp.statusCode} | ${resp.body.substring(0, resp.body.length.clamp(0, 80))}');
-
-  final token = resp.body.trim();
-  if (token.contains('<errors>') || token.length < 20) {
-    print('❌ Token hatası: $token');
-    return null;
-  }
-
-  // JWT exp kontrolü
-  final parts = token.split('.');
-  if (parts.length == 3) {
-    try {
-      final payload = jsonDecode(utf8.decode(base64Url.decode(base64.normalize(parts[1])))) as Map;
-      final exp = payload['exp'] as int?;
-      if (exp != null) {
-        final mins = DateTime.fromMillisecondsSinceEpoch(exp * 1000).difference(DateTime.now()).inMinutes;
-        print('✅ Token geçerli — $mins dk kaldı');
-      }
-    } catch (_) {}
-  }
-  return token;
-}
-
 void main() async {
-  print('🚀 Mackolik Visual URL Test\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  final url = await getVisualUrl(4314542);
-  print('\n🎯 ${url ?? "BAŞARISIZ"}');
-  print('\n✅ Tamamlandı.');
+  print('🚀 Mackolik Visual → Supabase Test\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+  // 1. Visual URL al
+  final visualUrl = await fetchVisualUrl(testMackolikId);
+  if (visualUrl == null) { print('❌ URL alınamadı'); return; }
+  print('🎯 URL: $visualUrl\n');
+
+  // 2. Supabase'e yaz
+  print('💾 Supabase\'e yazılıyor...');
+  final supabase = SupabaseClient(supabaseUrl, supabaseKey);
+
+  try {
+    final result = await supabase
+        .from('live_matches')
+        .update({'visual_url': visualUrl})
+        .eq('fixture_id', testFixtureId)
+        .select('fixture_id, visual_url');
+
+    print('✅ Supabase sonuç: $result');
+  } catch (e) {
+    print('❌ Supabase hatası: $e');
+  }
+
+  print('\n✅ Test tamamlandı.');
 }
