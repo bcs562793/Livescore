@@ -1,33 +1,30 @@
-name: Match Statistics Bot
+name: Stats Bot
 
 on:
-  # Manuel olarak GitHub üzerinden butona basıp çalıştırmak istersen:
-  workflow_dispatch: 
-  
-  # Otomatik çalışması için zamanlayıcı (Cron - UTC saatine göre çalışır)
-  schedule:
-    # Örneğin: Her gece Türkiye saatiyle 03:00'te çalışması için UTC 00:00 yazıyoruz
-    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      mackolik_ids:
+        description: 'Mackolik ID (birden fazla için virgülle ayır: 4418306,4418307)'
+        required: true
+        type: string
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Depoyu Çek
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Dart Ortamını Kur
-        uses: dart-lang/setup-dart@v1
+      - uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
 
-      - name: Paketleri İndir
+      - name: Install dependencies
         run: dart pub get
 
-      - name: İstatistik Botunu Çalıştır
+      - name: Run Stats Bot
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          MACKOLIK_IDS: ${{ github.event.inputs.mackolik_ids }}
         run: dart run stats_bot.dart
