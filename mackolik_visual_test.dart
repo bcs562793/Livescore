@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:supabase/supabase.dart';
 
-const testFixtureId = 1400190;
-const testMackolikId = 4314542;
+const testFixtureId = 1394657;
+const testMackolikId = 4308537;
 
 class _CookieClient {
   final Map<String, String> _cookies = {};
