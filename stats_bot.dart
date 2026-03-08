@@ -11,39 +11,34 @@ final _macHeaders = {
 };
 
 const _statsNameMap = {
-  'Topla Oynama': 'Ball Possession',
-  'Toplam Şut': 'Total Shots',
-  'İsabetli Şut': 'Shots on Goal',
-  'İsabetsiz Şut': 'Shots off Goal',
+  'Topla Oynama':     'Ball Possession',
+  'Toplam Şut':       'Total Shots',
+  'İsabetli Şut':     'Shots on Goal',
+  'İsabetsiz Şut':    'Shots off Goal',
   'Bloke Edilen Şut': 'Blocked Shots',
-  'Başarılı Paslar': 'Passes accurate',
-  'Pas Başarı(%)': 'Passes %',
-  'Pas Başarı %': 'Passes %',
-  'Korner': 'Corner Kicks',
-  'Köşe Vuruşu': 'Corner Kicks',
-  'Orta': 'Crosses',
-  'Faul': 'Fouls',
-  'Ofsayt': 'Offsides',
-  'Sarı Kart': 'Yellow Cards',
-  'Kırmızı Kart': 'Red Cards',
-  'Kurtarış': 'Goalkeeper Saves',
-  'Tehlikeli Ataklar': 'Dangerous Attacks',
-  'Ataklar': 'Attacks',
+  'Başarılı Paslar':  'Passes accurate',
+  'Pas Başarı(%)':    'Passes %',
+  'Pas Başarı %':     'Passes %',
+  'Pas Başarı()':     'Passes %',
+  'Korner':           'Corner Kicks',
+  'Köşe Vuruşu':      'Corner Kicks',
+  'Orta':             'Crosses',
+  'Faul':             'Fouls',
+  'Ofsayt':           'Offsides',
+  'Sarı Kart':        'Yellow Cards',
+  'Kırmızı Kart':     'Red Cards',
+  'Kurtarış':         'Goalkeeper Saves',
+  'Tehlikeli Ataklar':'Dangerous Attacks',
+  'Ataklar':          'Attacks',
 };
 
 // ─── FUZZY MATCH FONKSİYONLARI ───
 String _normalize(String name) {
   return name
       .toLowerCase()
-      .replaceAll('ı', 'i')
-      .replaceAll('ğ', 'g')
-      .replaceAll('ü', 'u')
-      .replaceAll('ş', 's')
-      .replaceAll('ö', 'o')
-      .replaceAll('ç', 'c')
-      .replaceAll('é', 'e')
-      .replaceAll('á', 'a')
-      .replaceAll('ñ', 'n')
+      .replaceAll('ı', 'i').replaceAll('ğ', 'g').replaceAll('ü', 'u')
+      .replaceAll('ş', 's').replaceAll('ö', 'o').replaceAll('ç', 'c')
+      .replaceAll('é', 'e').replaceAll('á', 'a').replaceAll('ñ', 'n')
       .replaceAll(RegExp(r'[^\w\s]'), '')
       .replaceAll(RegExp(r'\s+'), ' ')
       .trim();
@@ -72,19 +67,17 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(
   print('  🔍 [LOG] Mackolik maç sayfası inceleniyor... ID: $mackolikId');
 
   final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-  print('  🔗 [LOG] İstek atılan URL: $url');
-
   final res = await http
       .get(Uri.parse(url), headers: _macHeaders)
       .timeout(const Duration(seconds: 10));
   print('  📥 [LOG] Mackolik HTTP Status: ${res.statusCode}');
 
   final titleMatch = RegExp(
-          r'<title>([^<(]+?)\s*-\s*([^<(]+?)\s*\((\d{1,2})\.(\d{1,2})\.(\d{4})\)')
+      r'<title>([^<(]+?)\s*-\s*([^<(]+?)\s*\((\d{1,2})\.(\d{1,2})\.(\d{4})\)')
       .firstMatch(res.body);
 
   if (titleMatch == null) {
-    print('  ❌ [HATA] Beklenen tarih formatı Regex ile eşleşmedi!');
+    print('  ❌ [HATA] Title parse edilemedi!');
     return null;
   }
 
@@ -95,9 +88,7 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(
   final year    = titleMatch.group(5)!;
   final apiDate = '$year-$month-$day';
 
-  print('  📅 [LOG] Parse edilen tarih: $apiDate');
-  print('  ⚽ [LOG] Takımlar: $macHome vs $macAway');
-  print('  📡 [LOG] API-Football üzerinde aranıyor... (Tarih: $apiDate)');
+  print('  📅 [LOG] Tarih: $apiDate | Takımlar: $macHome vs $macAway');
 
   final apiRes = await http.get(
     Uri.parse('https://v3.football.api-sports.io/fixtures?date=$apiDate'),
@@ -105,21 +96,19 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(
   ).timeout(const Duration(seconds: 15));
 
   if (apiRes.statusCode != 200) {
-    print('  ❌ [HATA] API-Football isteği başarısız! Status: ${apiRes.statusCode}');
+    print('  ❌ [HATA] API-Football başarısız! Status: ${apiRes.statusCode}');
     return null;
   }
 
-  final apiData  = jsonDecode(apiRes.body);
-  final fixtures = apiData['response'] as List? ?? [];
+  final fixtures = (jsonDecode(apiRes.body)['response'] as List? ?? []);
 
   Map<String, dynamic>? bestMatch;
   double bestScore = 0;
 
   for (final fixture in fixtures) {
-    final teams   = fixture['teams'];
-    final apiHome = teams['home']['name'];
-    final apiAway = teams['away']['name'];
-
+    final teams    = fixture['teams'];
+    final apiHome  = teams['home']['name'] as String;
+    final apiAway  = teams['away']['name'] as String;
     final homeSim  = _teamSimilarity(macHome, apiHome);
     final awaySim  = _teamSimilarity(macAway, apiAway);
     final combined = (homeSim + awaySim) / 2;
@@ -131,12 +120,12 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(
   }
 
   if (bestMatch != null && bestScore >= 0.65) {
-    print('  ✅ [BAŞARILI] Eşleşti! Fixture ID: ${bestMatch['fixture']['id']}'
-        ' (${(bestScore * 100).toStringAsFixed(0)}% benzerlik)');
+    print('  ✅ Eşleşti! Fixture ID: ${bestMatch['fixture']['id']}'
+        ' (${(bestScore * 100).toStringAsFixed(0)}%)');
     return bestMatch;
   }
 
-  print('  ❌ [HATA] API-Football tarafında uygun eşleşme bulunamadı.');
+  print('  ❌ [HATA] API-Football eşleşmesi bulunamadı.');
   return null;
 }
 
@@ -151,111 +140,80 @@ Future<String> _macFetchStats(int mackolikId) async {
     }).timeout(const Duration(seconds: 10));
     return res.statusCode == 200 ? res.body : '';
   } catch (e) {
-    print('  ⚠️ Mackolik stats hatası ($mackolikId): $e');
+    print('  ⚠️ Stats fetch hatası: $e');
     return '';
   }
 }
 
-// ─── STATS TRANSFORM → FİREBASE İLE AYNI FORMAT ───
-// [{type: '...', homeVal: ..., awayVal: ...}]
-List<Map<String, dynamic>>? _macTransformStatistics(String text) {
-  if (text.trim().length < 20) return null;
-  if (text.trim().startsWith('{') || text.trim().startsWith('[')) return null;
+// ─── STATS PARSE — NODE.JS SCRAPER İLE AYNI REGEX MANTIĞI ───
+//
+// Mackolik HTML yapısı:
+//   <div class="team-1-statistics-text">27</div>   ← home değer
+//   <div class="statistics-title-text">Topla Oynama</div>  ← başlık
+//   <div class="team-2-statistics-text">%73</div>   ← away değer
+//
+// Node.js scraper'daki parseStatsHtml() ile birebir aynı mantık.
+List<Map<String, dynamic>>? _parseStatsHtml(String html) {
+  if (html.trim().length < 20) return null;
 
-  final lines = text
-      .split('\n')
-      .map((l) => l.trim())
-      .where((l) => l.isNotEmpty)
-      .toList();
+  final stats = <Map<String, dynamic>>[];
 
-  if (lines.isEmpty) return null;
-
-  final stats      = <Map<String, dynamic>>[];
-  final startIndex = lines[0].contains('İstatistikler') ? 1 : 0;
-
-  dynamic fmtVal(String raw) {
-    raw = raw.trim().replaceAll('%', '').replaceAll('&nbsp;', '').trim();
-    if (raw.isEmpty || raw == '-') return 0;
-    if (raw.contains('/')) return raw;
-    final n = num.tryParse(raw);
-    return n ?? raw;
+  dynamic parseVal(String v) {
+    v = v.trim().replaceAll('%', '').replaceAll('&nbsp;', '').trim();
+    if (v.isEmpty || v == '-') return 0;
+    if (v.contains('/')) return v;   // "5/23" gibi değerler string kalır
+    final n = num.tryParse(v);
+    return n ?? v;
   }
 
-  // ── Pattern 1: 3'lü gruplar (away / title / home) ──
-  for (int i = startIndex; i + 2 < lines.length; i += 3) {
-    final awayValue = lines[i];
-    final titleRaw  = lines[i + 1];
-    final homeValue = lines[i + 2];
+  // Regex: home → title → away sırasıyla yakala
+  final pattern = RegExp(
+    r'class="team-1-statistics-text"[^>]*>([\s\S]*?)<\/div>'
+    r'[\s\S]*?'
+    r'class="statistics-title-text"[^>]*>([\s\S]*?)<\/div>'
+    r'[\s\S]*?'
+    r'class="team-2-statistics-text"[^>]*>([\s\S]*?)<\/div>',
+  );
 
-    if (titleRaw.isEmpty) continue;
+  for (final m in pattern.allMatches(html)) {
+    // HTML tag'lerini temizle
+    final homeRaw = m.group(1)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
+    final titleTR = m.group(2)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
+    final awayRaw = m.group(3)!.replaceAll(RegExp(r'<[^>]+>'), '').trim();
 
-    final titleEN = _statsNameMap[titleRaw] ??
-        _statsNameMap[titleRaw.replaceAll('(%)', '').trim()] ??
-        titleRaw;
+    if (titleTR.isEmpty || homeRaw.isEmpty || awayRaw.isEmpty) continue;
+
+    final titleEN = _statsNameMap[titleTR] ??
+        _statsNameMap[titleTR.replaceAll('(%)', '').trim()] ??
+        titleTR;
 
     stats.add({
       'type':    titleEN,
-      'homeVal': fmtVal(homeValue),
-      'awayVal': fmtVal(awayValue),
+      'homeVal': parseVal(homeRaw),
+      'awayVal': parseVal(awayRaw),
     });
   }
 
   if (stats.isNotEmpty) {
-    print('  📊 [LOG] ${stats.length} istatistik başlığı işlendi (Pattern 1).');
+    print('  📊 [LOG] ${stats.length} istatistik parse edildi.');
     return stats;
   }
 
-  // ── Pattern 2: Alternatif sıra ──
-  print('  ⚠️ [UYARI] Pattern 1 boş, alternatif deneniyor...');
-  final altLines = lines.where((l) => !l.contains('İstatistikler')).toList();
-
-  for (int i = 0; i + 2 < altLines.length; i++) {
-    final l1 = altLines[i];
-    final l2 = altLines[i + 1];
-    final l3 = altLines[i + 2];
-
-    String? titleRaw, homeVal, awayVal;
-
-    if (!_isNumeric(l1) && !l1.startsWith('%') && !l1.contains('/')) {
-      titleRaw = l1; homeVal = l2; awayVal = l3;
-    } else if (!_isNumeric(l2) && !l2.startsWith('%') && !l2.contains('/')) {
-      titleRaw = l2; homeVal = l1; awayVal = l3;
-    } else {
-      continue;
-    }
-
-    final titleEN = _statsNameMap[titleRaw] ??
-        _statsNameMap[titleRaw.replaceAll('(%)', '').trim()] ??
-        titleRaw;
-
-    if (!stats.any((s) => s['type'] == titleEN)) {
-      stats.add({
-        'type':    titleEN,
-        'homeVal': fmtVal(homeVal!),
-        'awayVal': fmtVal(awayVal!),
-      });
-    }
-  }
-
-  if (stats.isEmpty) return null;
-
-  print('  📊 [LOG] ${stats.length} istatistik başlığı işlendi (Pattern 2).');
-  return stats;
+  print('  ⚠️ [UYARI] Regex eşleşmedi, ham HTML (ilk 200): '
+      '${html.substring(0, html.length > 200 ? 200 : html.length).replaceAll('\n', ' ')}');
+  return null;
 }
-
-bool _isNumeric(String str) => num.tryParse(str.trim()) != null;
 
 // ─── ANA ÇALIŞTIRICI ───
 void main() async {
-  print('🚀 Otomatik İstatistik Botu Başlatılıyor...\n');
+  print('🚀 Stats Bot Başlatılıyor...\n');
 
   final sbUrl  = Platform.environment['SUPABASE_URL']     ?? '';
   final sbKey  = Platform.environment['SUPABASE_KEY']     ?? '';
   final apiKey = Platform.environment['API_FOOTBALL_KEY'] ?? '';
 
   if (sbUrl.isEmpty || sbKey.isEmpty || apiKey.isEmpty) {
-    print('❌ [HATA] Ortam değişkenleri eksik!');
-    print('Gerekenler: SUPABASE_URL, SUPABASE_KEY, API_FOOTBALL_KEY');
+    print('❌ Eksik env: SUPABASE_URL, SUPABASE_KEY, API_FOOTBALL_KEY');
     exit(1);
   }
 
@@ -265,88 +223,77 @@ void main() async {
     4418306,
   ];
 
-  int basarili = 0;
-  int hatali   = 0;
-
-  print('📋 Toplam ${mackolikIds.length} maçın istatistikleri işlenecek.\n');
+  int basarili = 0, hatali = 0;
+  print('📋 ${mackolikIds.length} maç işlenecek.\n');
 
   for (final mackolikId in mackolikIds) {
     print('----------------------------------------------------');
-    print('⚙️  İşleniyor: Mackolik ID $mackolikId');
+    print('⚙️  Mackolik ID: $mackolikId');
 
-    // ── 1. API-Football eşleşmesi — ZORUNLU ──────────────────────────
-    //    fixture_id BİRİNCİL ANAHTAR olduğu için null olamaz.
-    //    Eşleşme bulunamazsa maç atlanır.
+    // 1. fixture_id al — ZORUNLU
     final apiMatch = await _getApiFootballMatchInfo(mackolikId, apiKey);
     if (apiMatch == null) {
-      print('  ❌ [ATLA] fixture_id alınamadı, kayıt atlanıyor.');
+      print('  ❌ fixture_id alınamadı, atlanıyor.');
       hatali++;
       continue;
     }
-
     final int fixtureId = apiMatch['fixture']['id'] as int;
 
-    // ── 2. Mackolik stats HTML ────────────────────────────────────────
-    print('  📊 Mackolik istatistikleri çekiliyor...');
+    // 2. Stats HTML çek
+    print('  📡 Mackolik stats çekiliyor...');
     final statsHtml = await _macFetchStats(mackolikId);
 
     if (statsHtml.isEmpty || statsHtml.trim().length < 20) {
-      print('  ❌ [HATA] İstatistik HTML boş veya geçersiz.');
+      print('  ❌ Stats HTML boş.');
       hatali++;
       continue;
     }
 
-    // ── 3. Firebase ile AYNI formata dönüştür ────────────────────────
-    final statsData = _macTransformStatistics(statsHtml);
+    // 3. HTML'den değerleri regex ile parse et (Node.js ile aynı mantık)
+    final statsData = _parseStatsHtml(statsHtml);
 
     if (statsData == null || statsData.isEmpty) {
-      print('  ❌ [HATA] İstatistikler parse edilemedi.');
+      print('  ❌ Stats parse edilemedi.');
       hatali++;
       continue;
     }
 
-    // ── 4. Payload ────────────────────────────────────────────────────
+    // 4. Payload — sadece tabloda var olan kolonlar
     //
-    //    Supabase tablo şeması:
+    //    Tablo şeması:
     //      CREATE TABLE match_statistics (
-    //        fixture_id   BIGINT PRIMARY KEY,  -- API-Football ID (zorunlu)
-    //        mackolik_id  BIGINT,              -- Mackolik ID (referans)
-    //        stats        JSONB NOT NULL,      -- [{type, homeVal, awayVal}]
-    //        updated_at   TIMESTAMPTZ
+    //        fixture_id  BIGINT PRIMARY KEY,
+    //        stats       JSONB NOT NULL,
+    //        updated_at  TIMESTAMPTZ
     //      );
-    // ─────────────────────────────────────────────────────────────────
     final supabasePayload = {
-      'fixture_id':  fixtureId,   // ✅ BİRİNCİL ANAHTAR — API-Football ID
-      'mackolik_id': mackolikId,  // ✅ Referans — Mackolik ID
-      'stats':       statsData,   // ✅ Firebase ile aynı format
-      'updated_at':  DateTime.now().toUtc().toIso8601String(),
+      'fixture_id': fixtureId,
+      'stats':      statsData,   // [{type, homeVal, awayVal}] — Firebase ile aynı
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
 
     final encoder = JsonEncoder.withIndent('  ');
     print('\n═══════════════════════════════════════════════════════════');
-    print('🔍 [DEBUG] SUPABASE\'E YAZILACAK JSON');
+    print('🔍 [DEBUG] YAZILACAK JSON');
     print('═══════════════════════════════════════════════════════════');
     print(encoder.convert(supabasePayload));
     print('═══════════════════════════════════════════════════════════\n');
 
-    // ── 5. Upsert — fixture_id üzerinden çakışma kontrolü ────────────
+    // 5. Upsert
     try {
       await sb
           .from('match_statistics')
           .upsert(supabasePayload, onConflict: 'fixture_id');
-
-      print('  🎉 [BAŞARILI] Yazıldı. fixture_id=$fixtureId | mackolik_id=$mackolikId');
+      print('  🎉 Yazıldı. fixture_id=$fixtureId');
       basarili++;
     } catch (e) {
-      print('  ❌ [HATA] Supabase Yazma Hatası: $e');
+      print('  ❌ Supabase Hatası: $e');
       hatali++;
     }
 
     await Future.delayed(const Duration(seconds: 2));
   }
 
-  print('\n🏁 İŞLEM TAMAMLANDI!');
-  print('✅ Başarılı: $basarili');
-  print('❌ Hatalı:   $hatali');
+  print('\n🏁 TAMAMLANDI — ✅ $basarili başarılı | ❌ $hatali hatalı');
   exit(0);
 }
