@@ -100,7 +100,20 @@ Future<Map<String, dynamic>?> _getApiFootballMatchInfo(
     return null;
   }
 
-  final fixtures = (jsonDecode(apiRes.body)['response'] as List? ?? []);
+  final apiBody = jsonDecode(apiRes.body);
+  final fixtures = (apiBody['response'] as List? ?? []);
+  print('  [LOG] API-Football toplam fixture: ${fixtures.length} | errors: ${apiBody["errors"]}');
+
+  // En iyi eşleşmeyi bulmadan önce tüm takım isimlerini logla (debug)
+  if (fixtures.isNotEmpty && fixtures.length <= 20) {
+    for (final f in fixtures) {
+      final h = f['teams']['home']['name'];
+      final a = f['teams']['away']['name'];
+      final hs = _teamSimilarity(macHome, h);
+      final as_ = _teamSimilarity(macAway, a);
+      if (hs > 0.3 || as_ > 0.3) print('  -> $h vs $a (sim: ${hs.toStringAsFixed(2)}/${as_.toStringAsFixed(2)})');
+    }
+  }
 
   Map<String, dynamic>? bestMatch;
   double bestScore = 0;
@@ -292,7 +305,7 @@ void main() async {
     //      );
     final supabasePayload = {
       'fixture_id': fixtureId,
-      'stats':      statsData,   // [{type, homeVal, awayVal}] — Firebase ile aynı
+      'data':       statsData,   // [{type, homeVal, awayVal}]
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
 
