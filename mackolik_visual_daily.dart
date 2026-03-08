@@ -161,25 +161,9 @@ void main() async {
   final mackolikData = jsonDecode(mackolikResp.body) as Map;
   print('   🔍 Top-level keys: ${mackolikData.keys.toList()}');
 
-  // Tüm maçları topla — hem düz liste hem nested yapı
-  final rawTop = (mackolikData['m'] as List?) ?? (mackolikData['d'] as List?) ?? [];
-  if (rawTop.isNotEmpty) {
-    final first = rawTop[0] as Map;
-    print('   🔍 d[0] keys: ${first.keys.toList()}');
-    print('   🔍 d[0]: $first');
-  }
-
-  final rawMatches = <Map>[];
-  for (final item in rawTop) {
-    final map = item as Map;
-    if (map.containsKey('m') && map['m'] is List) {
-      for (final match in map['m'] as List) rawMatches.add(match as Map);
-    } else if (map.containsKey('matches') && map['matches'] is List) {
-      for (final match in map['matches'] as List) rawMatches.add(match as Map);
-    } else {
-      rawMatches.add(map);
-    }
-  }
+  // m direkt maç listesi
+  final rawMatches = (mackolikData['m'] as List? ?? mackolikData['d'] as List? ?? [])
+      .cast<Map>();
   print('   ${rawMatches.length} raw maç bulundu');
   if (rawMatches.isNotEmpty) {
     print('   🔍 İlk maç keys: ${rawMatches[0].keys.toList()}');
