@@ -1,108 +1,126 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' show parse;
 
-/// Mackolik sayfasından rbid ve takım isimlerini çek
-Future<Map<String, dynamic>?> getMackolikMatchInfo(int mackolikId) async {
-  final url = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-  final response = await http.get(Uri.parse(url), headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml',
-    'Accept-Language': 'tr-TR,tr;q=0.9',
-    'Referer': 'https://arsiv.mackolik.com/',
-  }).timeout(const Duration(seconds: 15));
+/// Cookie-aware HTTP client
+class CookieClient {
+  final Map<String, String> _cookies = {};
+  final _client = http.Client();
 
-  if (response.statusCode != 200) return null;
-  final body = response.body;
+  Future<http.Response> get(String url, {Map<String, String>? headers}) async {
+    final cookieHeader = _cookies.entries.map((e) => '${e.key}=${e.value}').join('; ');
+    final response = await _client.get(Uri.parse(url), headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8',
+      'Accept-Encoding': 'gzip, deflate, br',
+      if (cookieHeader.isNotEmpty) 'Cookie': cookieHeader,
+      ...?headers,
+    });
 
-  final matchIdMatch = RegExp(r'var matchId\s*=\s*(\d+)').firstMatch(body);
-  final rbid = matchIdMatch?.group(1);
-  final homeMatch = RegExp(r'homeTeam=([^&"\\]+)').firstMatch(body);
-  final awayMatch = RegExp(r'awayTeam=([^&"\\]+)').firstMatch(body);
-
-  return {
-    'rbid': rbid,
-    'homeTeam': Uri.decodeComponent(homeMatch?.group(1) ?? ''),
-    'awayTeam': Uri.decodeComponent(awayMatch?.group(1) ?? ''),
-    'pageUrl': url,
-  };
-}
-
-/// Token endpoint — Referer olarak maç sayfasını ver
-Future<String?> getVisualToken(String rbid, String pageUrl) async {
-  final tokenUrl = 'https://visualisation.performgroup.com/getToken'
-      '?rbid=$rbid&customerId=mackolikWeb';
-
-  print('🔑 Token isteği: $tokenUrl');
-
-  final response = await http.get(Uri.parse(tokenUrl), headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': '*/*',
-    'Accept-Language': 'tr-TR,tr;q=0.9',
-    'Referer': pageUrl,                        // ← maç sayfasını referer ver
-    'Origin': 'https://arsiv.mackolik.com',    // ← origin ekle
-    'X-Requested-With': 'XMLHttpRequest',      // ← jQuery $.get gibi davran
-  }).timeout(const Duration(seconds: 15));
-
-  print('📡 Status: ${response.statusCode}');
-  print('📄 Response: ${response.body.substring(0, response.body.length.clamp(0, 300))}');
-
-  if (response.statusCode != 200) return null;
-
-  final body = response.body.trim();
-  // Hata kontrolü: <errors> içeriyorsa başarısız
-  if (body.contains('<errors>') || body.isEmpty) {
-    print('❌ Token endpoint hata döndü');
-    return null;
-  }
-  return body;
-}
-
-void analyzeToken(String token) {
-  try {
-    final parts = token.split('.');
-    if (parts.length != 3) { print('ℹ️ JWT değil: $token'); return; }
-    final payload = jsonDecode(
-      utf8.decode(base64Url.decode(base64.normalize(parts[1])))
-    ) as Map<String, dynamic>;
-    print('📦 Payload: $payload');
-    final exp = payload['exp'] as int?;
-    if (exp != null) {
-      final expiry = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
-      final remaining = expiry.difference(DateTime.now());
-      print('⏱ ${remaining.inMinutes} dk kaldı — ${remaining.isNegative ? "❌ DOLMUŞ" : "✅ GEÇERLİ"}');
+    // Set-Cookie header'larını parse et
+    final setCookie = response.headers['set-cookie'];
+    if (setCookie != null) {
+      for (final cookie in setCookie.split(',')) {
+        final parts = cookie.trim().split(';')[0].split('=');
+        if (parts.length >= 2) {
+          _cookies[parts[0].trim()] = parts.sublist(1).join('=').trim();
+        }
+      }
+      print('🍪 Cookie alındı: ${_cookies.keys.toList()}');
     }
-  } catch (e) { print('⚠️ $e'); }
+
+    return response;
+  }
+
+  void close() => _client.close();
 }
 
-void main() async {
-  print('🚀 Mackolik Visual Token Test\n');
+Future<void> testVisualToken(int mackolikId) async {
+  final client = CookieClient();
 
-  final mackolikIds = [4314542];
+  try {
+    final pageUrl = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
 
-  for (final id in mackolikIds) {
-    print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    print('🏟 Mackolik ID: $id');
+    // 1. Önce ana sayfayı ziyaret et (session cookie için)
+    print('🌐 Ana sayfa ziyareti...');
+    await client.get('https://arsiv.mackolik.com/', headers: {
+      'Referer': 'https://www.google.com/',
+    });
 
-    final info = await getMackolikMatchInfo(id);
-    if (info == null || info['rbid'] == null) { print('❌ Maç bilgisi yok'); continue; }
-    print('📋 rbid=${info['rbid']} | ${info['homeTeam']} vs ${info['awayTeam']}');
+    // 2. Maç sayfasını yükle
+    print('🔗 Maç sayfası: $pageUrl');
+    final pageResponse = await client.get(pageUrl, headers: {
+      'Referer': 'https://arsiv.mackolik.com/',
+    });
 
-    final token = await getVisualToken(info['rbid']!, info['pageUrl']!);
-    if (token == null) { print('❌ Token alınamadı'); continue; }
+    print('📡 Sayfa: ${pageResponse.statusCode}');
+    if (pageResponse.statusCode != 200) return;
 
-    analyzeToken(token);
+    final body = pageResponse.body;
+
+    // rbid ve takım isimlerini parse et
+    final matchIdMatch = RegExp(r'var matchId\s*=\s*(\d+)').firstMatch(body);
+    final rbid = matchIdMatch?.group(1);
+    final homeMatch = RegExp(r'homeTeam=([^&"\\]+)').firstMatch(body);
+    final awayMatch = RegExp(r'awayTeam=([^&"\\]+)').firstMatch(body);
+
+    if (rbid == null) { print('❌ rbid bulunamadı'); return; }
+    print('📋 rbid=$rbid | ${homeMatch?.group(1)} vs ${awayMatch?.group(1)}');
+
+    // 3. Token endpoint — artık session cookie var
+    final tokenUrl = 'https://visualisation.performgroup.com/getToken?rbid=$rbid&customerId=mackolikWeb';
+    print('\n🔑 Token isteği: $tokenUrl');
+
+    final tokenResponse = await client.get(tokenUrl, headers: {
+      'Referer': pageUrl,
+      'Origin': 'https://arsiv.mackolik.com',
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'text/plain, */*; q=0.01',
+    });
+
+    print('📡 Token status: ${tokenResponse.statusCode}');
+    print('📄 Token body: ${tokenResponse.body.substring(0, tokenResponse.body.length.clamp(0, 400))}');
+
+    final token = tokenResponse.body.trim();
+    if (token.contains('<errors>') || token.isEmpty) {
+      print('❌ Geçerli token alınamadı');
+      return;
+    }
+
+    // JWT decode
+    final parts = token.split('.');
+    if (parts.length == 3) {
+      final payload = jsonDecode(
+        utf8.decode(base64Url.decode(base64.normalize(parts[1])))
+      ) as Map<String, dynamic>;
+      print('\n📦 Token payload: $payload');
+      final exp = payload['exp'] as int?;
+      if (exp != null) {
+        final expiry = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+        print('⏱ ${expiry.difference(DateTime.now()).inMinutes} dk geçerli');
+      }
+    }
 
     final iframeUrl = 'https://visualisation.performgroup.com/csb/index.html'
         '?token=$token'
-        '&homeTeam=${Uri.encodeComponent(info['homeTeam']!)}'
-        '&awayTeam=${Uri.encodeComponent(info['awayTeam']!)}'
-        '&matchId=${info['rbid']}'
-        '&width=600&lang=tr&gacode=UA-241588-3&wbeventid=0'
+        '&homeTeam=${homeMatch?.group(1) ?? ''}'
+        '&awayTeam=${awayMatch?.group(1) ?? ''}'
+        '&matchId=$rbid&width=600&lang=tr'
+        '&gacode=UA-241588-3&wbeventid=0'
         '&cssdiff=//arsiv.mackolik.com/matchcast/css_diff.css';
 
     print('\n🎯 iframe URL:\n$iframeUrl');
-  }
 
+  } finally {
+    client.close();
+  }
+}
+
+void main() async {
+  print('🚀 Mackolik Visual Token (Cookie-aware) Test\n');
+  print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  await testVisualToken(4314542);
   print('\n✅ Test tamamlandı.');
 }
