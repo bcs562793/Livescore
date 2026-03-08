@@ -74,9 +74,18 @@ Future<String?> fetchVisualUrl(int mackolikId, _CookieClient client) async {
     }
 
     final body = page.body;
-    final rbid =
-        RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body)?.group(1) ??
-            RegExp(r'rbid=(\d+)').firstMatch(body)?.group(1);
+
+// DEBUG: rbid için farklı pattern'ları dene
+print('   🔍 Body length: ${body.length}');
+print('   🔍 Body snippet: ${body.substring(0, body.length.clamp(0, 500))}');
+
+// Daha geniş pattern'lar dene
+final rbid =
+    RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body)?.group(1) ??
+    RegExp(r'rbid=(\d+)').firstMatch(body)?.group(1) ??
+    RegExp(r'"rbid"\s*:\s*"?(\d+)"?').firstMatch(body)?.group(1) ??
+    RegExp(r'performgroup\.com[^"]*rbid=(\d+)').firstMatch(body)?.group(1) ??
+    RegExp(r'customerId=mackolik[^"]*[&?]rbid=(\d+)').firstMatch(body)?.group(1);
     if (rbid == null) {
       print('   ❌ rbid bulunamadı for mackolikId=$mackolikId');
       return null;
@@ -198,7 +207,7 @@ void main() async {
     .from('live_matches')
     .select('fixture_id, home_team, away_team, visual_url')
     .or('visual_url.is.null,visual_url.eq.')
-    .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'NS']);
+    .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE']);
 
   print('   ${(dbMatches as List).length} Supabase maç bulundu\n');
 
