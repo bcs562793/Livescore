@@ -1,0 +1,19 @@
+name: Flutter CI
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+      - run: flutter pub get
+      - name: Opta Token Endpoint Test
+        run: flutter test test/opta_api_test.dart # Buraya token doğrulama testini yazacağız
+  
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - run: flutter build apk --release
