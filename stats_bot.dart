@@ -220,7 +220,7 @@ void main() async {
   final sb = SupabaseClient(sbUrl, sbKey);
 
   final List<int> mackolikIds = [
-    4418306,
+    4418303,
   ];
 
   int basarili = 0, hatali = 0;
