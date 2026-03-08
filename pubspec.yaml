@@ -1,7 +1,6 @@
 name: test_scraper
 description: A new Flutter project.
 publish_to: 'none'
-
 version: 1.0.0+1
 
 environment:
@@ -14,10 +13,10 @@ dependencies:
   html: ^0.15.4
   jwt_decoder: ^2.0.1
   webview_flutter: ^4.0.0
+  supabase: ^2.0.0
 
-# --- BURASI ÇOK ÖNEMLİ: İKİ NOKTA OLMALI ---
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
-  test: ^1.24.0 # CI/CD için lazım olan test paketi burada olmalı
+  test: ^1.24.0
