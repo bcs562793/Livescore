@@ -96,7 +96,7 @@ void main() async {
   // Canlı maç ID'leri buraya — worker loglarından al
   final testMatches = [
     // {'id': CANLI_MACKOLIK_ID, 'name': 'Maç Adı'},
-    {'id': 4675932, 'name': 'FC Orenburg vs Zenit (canlı test)'},
+    {'id': 4314542, 'name': 'FC Orenburg vs Zenit (canlı test)'},
   ];
 
   for (final match in testMatches) {
