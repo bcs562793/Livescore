@@ -179,15 +179,16 @@ void main() async {
 
   // ── 3. Supabase'den bugünün live_matches'ini çek ──────────────────────────
   print('📡 Supabase live_matches çekiliyor...');
+  // match_date yok — visual_url'si null olan TÜM maçları al
+  // (live_matches zaten bugünün+yakın maçları tutuyor)
   final startOfDay = DateTime.utc(now.year, now.month, now.day).toIso8601String();
-  final endOfDay =
-      DateTime.utc(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
+  final endOfDay = DateTime.utc(now.year, now.month, now.day, 23, 59, 59).toIso8601String();
 
   final dbMatches = await supabase
-      .from('live_matches')
-      .select('fixture_id, home_team, away_team, visual_url')
-      .gte('match_date', startOfDay)
-      .lte('match_date', endOfDay);
+    .from('live_matches')
+    .select('fixture_id, home_team, away_team, visual_url')
+    .gte('updated_at', startOfDay)
+    .lte('updated_at', endOfDay);
 
   print('   ${(dbMatches as List).length} Supabase maç bulundu\n');
 
@@ -207,11 +208,6 @@ void main() async {
     final awayTeam = dbMatch['away_team'] as String? ?? '';
     final existingUrl = dbMatch['visual_url'] as String?;
 
-    // Zaten visual_url varsa atla
-    if (existingUrl != null && existingUrl.isNotEmpty) {
-      skipped++;
-      continue;
-    }
 
     // En iyi eşleşmeyi bul
     double bestScore = 0.0;
