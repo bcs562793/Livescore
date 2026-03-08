@@ -193,11 +193,12 @@ void main() async {
   // ── 3. Supabase'den bugünün live_matches'ini çek ──────────────────────────
   print('📡 Supabase live_matches çekiliyor...');
   // match_date yok — visual_url'si null olan TÜM maçları al
-  // (live_matches zaten bugünün+yakın maçları tutuyor)
-  final dbMatches = await supabase
-      .from('live_matches')
-      .select('fixture_id, home_team, away_team, visual_url')
-      .or('visual_url.is.null,visual_url.eq.');
+  /// YENİ:
+    final dbMatches = await supabase
+    .from('live_matches')
+    .select('fixture_id, home_team, away_team, visual_url')
+    .or('visual_url.is.null,visual_url.eq.')
+    .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'NS']);
 
   print('   ${(dbMatches as List).length} Supabase maç bulundu\n');
 
