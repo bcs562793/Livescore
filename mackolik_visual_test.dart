@@ -87,7 +87,7 @@ void main() async {
 
   // GitHub Actions secrets'tan oku
   final supabaseUrl = Platform.environment['SUPABASE_URL'];
-  final supabaseKey = Platform.environment['SUPABASE_SERVICE_KEY']
+  final supabaseKey = Platform.environment['SUPABASE_KEY']
                    ?? Platform.environment['SUPABASE_ANON_KEY'];
 
   if (supabaseUrl == null || supabaseKey == null) {
