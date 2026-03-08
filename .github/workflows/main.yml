@@ -8,12 +8,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dart-lang/setup-dart@v1
+      - uses: subosito/flutter-action@v2
         with:
-          sdk: stable
+          flutter-version: 'stable'
 
       - name: Bağımlılıkları yükle
-        run: dart pub get
+        run: flutter pub get
 
       - name: Mackolik Visual URL Testi
         run: dart run mackolik_visual_test.dart
