@@ -1,13 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:supabase/supabase.dart';
 
-// ─── Supabase config ───────────────────────────────────────────────
-const supabaseUrl = 'YOUR_SUPABASE_URL';
-const supabaseKey = 'YOUR_SUPABASE_ANON_KEY';
-const testFixtureId = 1400190; // FC Orenburg vs Zenit — API-Football fixture ID
-const testMackolikId = 4314542; // Mackolik ID
-// ───────────────────────────────────────────────────────────────────
+const testFixtureId = 1400190;
+const testMackolikId = 4314542;
 
 class _CookieClient {
   final Map<String, String> _cookies = {};
@@ -40,58 +37,41 @@ class _CookieClient {
 Future<String?> fetchVisualUrl(int mackolikId) async {
   final client = _CookieClient();
   try {
-    // 1. Session başlat
     await client.get('https://arsiv.mackolik.com/',
         referer: 'https://www.google.com/');
 
-    // 2. Maç sayfası
     final pageUrl = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
-    final page = await client.get(pageUrl,
-        referer: 'https://arsiv.mackolik.com/');
-    if (page.statusCode != 200) {
-      print('❌ Sayfa ${page.statusCode}');
-      return null;
-    }
+    final page = await client.get(pageUrl, referer: 'https://arsiv.mackolik.com/');
+    if (page.statusCode != 200) { print('❌ Sayfa ${page.statusCode}'); return null; }
 
-    // 3. rbid
     final body = page.body;
-    final call = RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body);
-    final uri  = RegExp(r'rbid=(\d+)').firstMatch(body);
-    final rbid = call?.group(1) ?? uri?.group(1);
+    final rbid = RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body)?.group(1)
+               ?? RegExp(r'rbid=(\d+)').firstMatch(body)?.group(1);
     if (rbid == null) { print('❌ rbid bulunamadı'); return null; }
     print('📋 rbid: $rbid');
 
-    // 4. Token
-    final tokenUrl = 'https://visualisation.performgroup.com/getToken'
-        '?rbid=$rbid&customerId=mackolikWeb';
-    final tokenResp = await client.get(tokenUrl,
-        referer: pageUrl,
-        extra: {
-          'Origin': 'https://arsiv.mackolik.com',
-          'X-Requested-With': 'XMLHttpRequest',
-          'Accept': 'text/plain, */*; q=0.01',
-        });
+    final tokenResp = await client.get(
+      'https://visualisation.performgroup.com/getToken?rbid=$rbid&customerId=mackolikWeb',
+      referer: pageUrl,
+      extra: {
+        'Origin': 'https://arsiv.mackolik.com',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Accept': 'text/plain, */*; q=0.01',
+      },
+    );
 
     final token = tokenResp.body.trim();
     print('📡 Token status: ${tokenResp.statusCode} | length: ${token.length}');
+    if (token.contains('<errors>') || token.length < 20) { print('❌ $token'); return null; }
 
-    if (token.contains('<errors>') || token.length < 20) {
-      print('❌ Token hatası: $token');
-      return null;
-    }
-
-    // 5. JWT exp
-    DateTime? expiresAt;
     final parts = token.split('.');
     if (parts.length == 3) {
       try {
-        final payload = jsonDecode(
-          utf8.decode(base64Url.decode(base64.normalize(parts[1])))
-        ) as Map;
+        final payload = jsonDecode(utf8.decode(base64Url.decode(base64.normalize(parts[1])))) as Map;
         final exp = payload['exp'] as int?;
         if (exp != null) {
-          expiresAt = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
-          print('⏱ Token: ${expiresAt.difference(DateTime.now()).inMinutes} dk geçerli');
+          final mins = DateTime.fromMillisecondsSinceEpoch(exp * 1000).difference(DateTime.now()).inMinutes;
+          print('⏱ Token: $mins dk geçerli');
         }
       } catch (_) {}
     }
@@ -105,12 +85,20 @@ Future<String?> fetchVisualUrl(int mackolikId) async {
 void main() async {
   print('🚀 Mackolik Visual → Supabase Test\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  // 1. Visual URL al
-  final visualUrl = await fetchVisualUrl(testMackolikId);
-  if (visualUrl == null) { print('❌ URL alınamadı'); return; }
-  print('🎯 URL: $visualUrl\n');
+  // GitHub Actions secrets'tan oku
+  final supabaseUrl = Platform.environment['SUPABASE_URL'];
+  final supabaseKey = Platform.environment['SUPABASE_SERVICE_KEY']
+                   ?? Platform.environment['SUPABASE_ANON_KEY'];
 
-  // 2. Supabase'e yaz
+  if (supabaseUrl == null || supabaseKey == null) {
+    print('❌ SUPABASE_URL veya SUPABASE_SERVICE_KEY env değişkeni eksik');
+    exit(1);
+  }
+
+  final visualUrl = await fetchVisualUrl(testMackolikId);
+  if (visualUrl == null) { print('❌ URL alınamadı'); exit(1); }
+  print('🎯 URL alındı\n');
+
   print('💾 Supabase\'e yazılıyor...');
   final supabase = SupabaseClient(supabaseUrl, supabaseKey);
 
@@ -121,7 +109,7 @@ void main() async {
         .eq('fixture_id', testFixtureId)
         .select('fixture_id, visual_url');
 
-    print('✅ Supabase sonuç: $result');
+    print('✅ Supabase: $result');
   } catch (e) {
     print('❌ Supabase hatası: $e');
   }
