@@ -219,13 +219,12 @@ void main() async {
 
   final sb = SupabaseClient(sbUrl, sbKey);
 
-  // Mackolik ID'lerini calistirmadan once sor
-  // Tek ID: 4418306  |  Birden fazla: 4418306,4418307
-  stdout.write('\n📝 Mackolik ID gir (virgülle ayır): ');
-  final rawInput = stdin.readLineSync()?.trim() ?? '';
+  // Mackolik ID'leri GitHub Actions'tan MACKOLIK_IDS env variable olarak gelir.
+  // Workflow çalıştırılırken 'Run workflow' ekranındaki kutucuğa girilir.
+  final rawInput = (Platform.environment['MACKOLIK_IDS'] ?? '').trim();
 
   if (rawInput.isEmpty) {
-    print('❌ ID girilmedi, çıkılıyor.');
+    print('❌ MACKOLIK_IDS env variable boş! GitHub Actions workflow_dispatch kutucuğuna ID gir.');
     exit(1);
   }
 
