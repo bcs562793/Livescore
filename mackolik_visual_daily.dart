@@ -206,7 +206,6 @@ void main() async {
     final dbMatches = await supabase
     .from('live_matches')
     .select('fixture_id, home_team, away_team, visual_url')
-    .or('visual_url.is.null,visual_url.eq.')
     .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE']);
 
   print('   ${(dbMatches as List).length} Supabase maç bulundu\n');
