@@ -17,7 +17,7 @@ jobs:
 
       # 1. ADIM: Paketleri indir (Eksik olan kısım buydu veya atlanmıştı)
       - name: Install Dependencies
-        run: dart pub get
+        run: flutter pub get
 
       # 2. ADIM: Kodu çalıştır
       - name: Run Standings Test
