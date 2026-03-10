@@ -10,12 +10,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Dart
-        uses: dart-lang/setup-dart@v1
+      # DÜZELTİLEN KISIM: Sadece Dart yerine Flutter'ı (ve dolayısıyla içindeki Dart'ı) kuruyoruz
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          sdk: stable
+          channel: 'stable'
 
-      # 1. ADIM: Paketleri indir (Eksik olan kısım buydu veya atlanmıştı)
+      # 1. ADIM: Artık sistem Flutter'ı tanıdığı için bu adım hata vermeyecek
       - name: Install Dependencies
         run: flutter pub get
 
