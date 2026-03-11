@@ -34,7 +34,7 @@ jobs:
             final count = args.length > 1 ? int.parse(args[1]) : 10;
             final delay = args.length > 2 ? int.parse(args[2]) : 1500;
 
-            final url = Uri.parse('https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=optaStats&id=$matchId');
+            final url = Uri.parse('https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=rbStats&id=$matchId');
             final client = HttpClient();
 
             print('🚀 Mackolik Stats Bot Testi Başlıyor...');
