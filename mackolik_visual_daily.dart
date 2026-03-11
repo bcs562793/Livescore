@@ -310,4 +310,5 @@ void main() async {
   print('   Atlanan (geçerli): $skipped');
   print('   Eşleşemeyen:      $failed');
   print('✅ Tamamlandı.');
+  exit(0); // ← bunu ekle
 }
