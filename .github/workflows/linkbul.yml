@@ -1,0 +1,100 @@
+# .github/workflows/detect-matchdata-path.yml
+name: Detect Mackolik MatchData Path
+
+on:
+  workflow_dispatch:
+    inputs:
+      mac_id:
+        description: 'Mackolik maç ID'
+        required: true
+        default: '4448054'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Step 1 - Maç sayfasından Match.js URL bul
+        id: find_js
+        run: |
+          MAC_ID="${{ github.event.inputs.mac_id }}"
+          echo "🔍 Maç sayfası çekiliyor: https://arsiv.mackolik.com/Mac/$MAC_ID/"
+
+          HTML=$(curl -s --max-time 15 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml,*/*;q=0.9" \
+            -H "Accept-Language: tr-TR,tr;q=0.9" \
+            -H "Referer: https://arsiv.mackolik.com/" \
+            "https://arsiv.mackolik.com/Mac/$MAC_ID/")
+
+          echo "HTML boyutu: ${#HTML}"
+          echo ""
+
+          echo "--- Match.js referansları ---"
+          echo "$HTML" | grep -oP 'https?://cm\.mackolik\.com[^"'\'' ]+Match\.js[^"'\'' ]*' | sort -u
+
+          JS_URL=$(echo "$HTML" | grep -oP 'https?://cm\.mackolik\.com[^"'\'' ]+Match\.js[^"'\'' ]*' | head -1)
+
+          if [ -z "$JS_URL" ]; then
+            echo "❌ Match.js bulunamadı!"
+            echo ""
+            echo "--- cm.mackolik.com JS dosyaları ---"
+            echo "$HTML" | grep -oP 'https?://cm\.mackolik\.com[^"'\'' ]+\.js[^"'\'' ]*' | sort -u
+            exit 1
+          fi
+
+          echo ""
+          echo "✅ Match.js URL: $JS_URL"
+          echo "js_url=$JS_URL" >> $GITHUB_OUTPUT
+
+      - name: Step 2 - Match.js içinden MatchData path bul
+        id: find_path
+        run: |
+          JS_URL="${{ steps.find_js.outputs.js_url }}"
+          MAC_ID="${{ github.event.inputs.mac_id }}"
+
+          echo "📄 Match.js çekiliyor: $JS_URL"
+          sleep 1
+
+          JS=$(curl -s --max-time 15 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+            -H "Referer: https://arsiv.mackolik.com/Mac/$MAC_ID/" \
+            "$JS_URL")
+
+          echo "JS boyutu: ${#JS}"
+          echo ""
+
+          echo "--- APP_ROOT + path satırları ---"
+          echo "$JS" | grep -oP ".{0,30}APP_ROOT.{0,120}" | head -20
+          echo ""
+
+          echo "--- t=dtl içeren satırlar ---"
+          echo "$JS" | grep -oP ".{0,50}t=dtl.{0,80}" | head -10
+          echo ""
+
+          echo "--- MatchData.aspx referansları ---"
+          echo "$JS" | grep -oP "['\"][^'\"]*MatchData[^'\"]*['\"]" | sort -u
+          echo ""
+
+          echo "--- Tüm /Match/ path'leri ---"
+          echo "$JS" | grep -oP "['\"][/][^'\"]*Match[^'\"]*['\"]" | sort -u
+
+      - name: Step 3 - Doğrulama: path çalışıyor mu
+        run: |
+          MAC_ID="${{ github.event.inputs.mac_id }}"
+
+          # Beklenen URL
+          TEST_URL="https://arsiv.mackolik.com/Match/MatchData.aspx?t=dtl&id=$MAC_ID&s=0"
+          echo "🔌 Test URL: $TEST_URL"
+
+          RESP=$(curl -s --max-time 10 -w "\n__STATUS__%{http_code}" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36" \
+            -H "Accept: */*" \
+            -H "X-Requested-With: XMLHttpRequest" \
+            -H "Referer: https://arsiv.mackolik.com/Mac/$MAC_ID/" \
+            "$TEST_URL")
+
+          STATUS=$(echo "$RESP" | grep "__STATUS__" | sed 's/__STATUS__//')
+          BODY=$(echo "$RESP" | grep -v "__STATUS__")
+          echo "HTTP: $STATUS | Boyut: ${#BODY} byte"
+          echo "İlk 300 karakter:"
+          echo "${BODY:0:300}"
