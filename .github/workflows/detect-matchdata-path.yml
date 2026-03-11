@@ -13,88 +13,110 @@ jobs:
   detect:
     runs-on: ubuntu-latest
     steps:
-      - name: Step 1 - Maç sayfasından Match.js URL bul
+      - name: Step 1 - Mac sayfasindan Match.js URL bul
         id: find_js
         run: |
           MAC_ID="${{ github.event.inputs.mac_id }}"
-          echo "🔍 Maç sayfası çekiliyor: https://arsiv.mackolik.com/Mac/$MAC_ID/"
+          echo "Mac sayfasi cekiliyor: https://arsiv.mackolik.com/Mac/$MAC_ID/"
 
-          HTML=$(curl -s --max-time 15 \
+          curl -s --max-time 15 \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
             -H "Accept: text/html,application/xhtml+xml,*/*;q=0.9" \
             -H "Accept-Language: tr-TR,tr;q=0.9" \
             -H "Referer: https://arsiv.mackolik.com/" \
-            "https://arsiv.mackolik.com/Mac/$MAC_ID/")
+            "https://arsiv.mackolik.com/Mac/$MAC_ID/" \
+            -o /tmp/page.html
 
-          echo "HTML boyutu: ${#HTML}"
-          echo ""
+          echo "HTML boyutu: $(wc -c < /tmp/page.html)"
 
-          echo "--- Match.js referansları ---"
-          echo "$HTML" | grep -oP 'https?://cm\.mackolik\.com[^"'\'' ]+Match\.js[^"'\'' ]*' | sort -u
+          python3 << 'PYEOF'
+          import re
 
-          JS_URL=$(echo "$HTML" | grep -oP 'https?://cm\.mackolik\.com[^"'\'' ]+Match\.js[^"'\'' ]*' | head -1)
+          with open('/tmp/page.html', 'r', encoding='utf-8', errors='replace') as f:
+              html = f.read()
+
+          print(f"HTML uzunluk: {len(html)}")
+
+          # Match.js URL bul
+          matches = re.findall(r'https?://cm\.mackolik\.com[^\s"\']+Match\.js[^\s"\']*', html)
+          print(f"\n--- Match.js referanslari ---")
+          for m in set(matches):
+              print(m)
+
+          # Tum cm.mackolik.com JS dosyalari
+          all_js = re.findall(r'https?://cm\.mackolik\.com[^\s"\']+\.js[^\s"\']*', html)
+          print(f"\n--- Tum cm.mackolik.com JS dosyalari ---")
+          for m in sorted(set(all_js)):
+              print(m)
+
+          # JS_URL'i kaydet
+          if matches:
+              js_url = list(set(matches))[0]
+              with open('/tmp/js_url.txt', 'w') as f:
+                  f.write(js_url)
+              print(f"\nKaydedildi: {js_url}")
+          else:
+              print("\nMatch.js BULUNAMADI")
+              with open('/tmp/js_url.txt', 'w') as f:
+                  f.write('')
+          PYEOF
+
+      - name: Step 2 - Match.js icinden MatchData path bul
+        run: |
+          MAC_ID="${{ github.event.inputs.mac_id }}"
+          JS_URL=$(cat /tmp/js_url.txt)
 
           if [ -z "$JS_URL" ]; then
-            echo "❌ Match.js bulunamadı!"
-            echo ""
-            echo "--- cm.mackolik.com JS dosyaları ---"
-            echo "$HTML" | grep -oP 'https?://cm\.mackolik\.com[^"'\'' ]+\.js[^"'\'' ]*' | sort -u
+            echo "JS_URL bos, Step 1 basarisiz"
             exit 1
           fi
 
-          echo ""
-          echo "✅ Match.js URL: $JS_URL"
-          echo "js_url=$JS_URL" >> $GITHUB_OUTPUT
-
-      - name: Step 2 - Match.js içinden MatchData path bul
-        id: find_path
-        run: |
-          JS_URL="${{ steps.find_js.outputs.js_url }}"
-          MAC_ID="${{ github.event.inputs.mac_id }}"
-
-          echo "📄 Match.js çekiliyor: $JS_URL"
+          echo "Match.js cekiliyor: $JS_URL"
           sleep 1
 
-          JS=$(curl -s --max-time 15 \
+          curl -s --max-time 15 \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
             -H "Referer: https://arsiv.mackolik.com/Mac/$MAC_ID/" \
-            "$JS_URL")
+            "$JS_URL" \
+            -o /tmp/match.js
 
-          echo "JS boyutu: ${#JS}"
-          echo ""
+          echo "JS boyutu: $(wc -c < /tmp/match.js)"
 
-          echo "--- APP_ROOT + path satırları ---"
-          echo "$JS" | grep -oP ".{0,30}APP_ROOT.{0,120}" | head -20
-          echo ""
+          python3 << 'PYEOF'
+          import re
 
-          echo "--- t=dtl içeren satırlar ---"
-          echo "$JS" | grep -oP ".{0,50}t=dtl.{0,80}" | head -10
-          echo ""
+          with open('/tmp/match.js', 'r', encoding='utf-8', errors='replace') as f:
+              js = f.read()
 
-          echo "--- MatchData.aspx referansları ---"
-          echo "$JS" | grep -oP "['\"][^'\"]*MatchData[^'\"]*['\"]" | sort -u
-          echo ""
+          print(f"JS uzunluk: {len(js)}")
 
-          echo "--- Tüm /Match/ path'leri ---"
-          echo "$JS" | grep -oP "['\"][/][^'\"]*Match[^'\"]*['\"]" | sort -u
+          print("\n--- APP_ROOT + path satirlari ---")
+          for m in re.findall(r'.{0,40}APP_ROOT.{0,150}', js):
+              print(m.strip())
 
-      - name: Step 3 - Doğrulama: path çalışıyor mu
+          print("\n--- t=dtl iceren satirlar ---")
+          for m in re.findall(r'.{0,60}t=dtl.{0,80}', js):
+              print(m.strip())
+
+          print("\n--- MatchData.aspx referanslari ---")
+          for m in set(re.findall(r'["\'][^"\']*MatchData[^"\']*["\']', js)):
+              print(m)
+
+          print("\n--- Tum /Match/ pathleri ---")
+          for m in sorted(set(re.findall(r'["\'][/][^"\']*Match[^"\']*["\']', js))):
+              print(m)
+          PYEOF
+
+      - name: Step 3 - Dogrulama
         run: |
           MAC_ID="${{ github.event.inputs.mac_id }}"
-
-          # Beklenen URL
           TEST_URL="https://arsiv.mackolik.com/Match/MatchData.aspx?t=dtl&id=$MAC_ID&s=0"
-          echo "🔌 Test URL: $TEST_URL"
+          echo "Test URL: $TEST_URL"
 
-          RESP=$(curl -s --max-time 10 -w "\n__STATUS__%{http_code}" \
+          curl -s --max-time 10 \
             -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36" \
             -H "Accept: */*" \
             -H "X-Requested-With: XMLHttpRequest" \
             -H "Referer: https://arsiv.mackolik.com/Mac/$MAC_ID/" \
-            "$TEST_URL")
-
-          STATUS=$(echo "$RESP" | grep "__STATUS__" | sed 's/__STATUS__//')
-          BODY=$(echo "$RESP" | grep -v "__STATUS__")
-          echo "HTTP: $STATUS | Boyut: ${#BODY} byte"
-          echo "İlk 300 karakter:"
-          echo "${BODY:0:300}"
+            -w "\nHTTP_STATUS:%{http_code}\nBOYUT:%{size_download}\n" \
+            "$TEST_URL" | tail -3
