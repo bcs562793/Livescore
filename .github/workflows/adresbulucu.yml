@@ -1,0 +1,66 @@
+# .github/workflows/detect-mac-stats.yml
+name: Detect Mackolik Stats Command
+
+on:
+  workflow_dispatch:
+    inputs:
+      mac_id:
+        description: 'Mackolik maç ID (örn: 4309095)'
+        required: true
+        default: '4309095'
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch & Detect
+        run: |
+          MAC_ID="${{ github.event.inputs.mac_id }}"
+          PAGE_URL="https://arsiv.mackolik.com/Mac/${MAC_ID}/"
+
+          echo "🔍 Maç sayfası çekiliyor: $PAGE_URL"
+
+          HTML=$(curl -s --max-time 15 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+            -H "Accept-Language: tr-TR,tr;q=0.9,en-US;q=0.8" \
+            -H "Referer: https://arsiv.mackolik.com/" \
+            "$PAGE_URL")
+
+          echo "📄 HTML uzunluğu: ${#HTML} karakter"
+          echo ""
+
+          # ── Sadece MatchHandler.aspx?command= sonrasını bul ──
+          echo "=== MatchHandler.aspx command değerleri ==="
+          echo "$HTML" | grep -oP 'MatchHandler\.aspx\?command=\K[^&"'\''&\s]+' | sort -u
+
+          echo ""
+          echo "=== MatchHandler.aspx içeren tüm satırlar ==="
+          echo "$HTML" | grep -i 'MatchHandler' | sed 's/^[[:space:]]*//'
+
+          echo ""
+          echo "=== Tüm command= değerleri (bağlam göster) ==="
+          echo "$HTML" | grep -oP '.{0,30}MatchHandler\.aspx\?command=.{0,40}'
+
+      - name: Probe Each Command
+        run: |
+          MAC_ID="${{ github.event.inputs.mac_id }}"
+
+          for CMD in optaStats rbStats matchStats liveStats statsData; do
+            URL="https://arsiv.mackolik.com/AjaxHandlers/MatchHandler.aspx?command=${CMD}&id=${MAC_ID}"
+            echo -n "🔌 command=${CMD} → "
+
+            RESP=$(curl -s --max-time 10 -w "\nHTTP_STATUS:%{http_code}" \
+              -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36" \
+              -H "Accept: application/json, text/javascript, */*; q=0.01" \
+              -H "X-Requested-With: XMLHttpRequest" \
+              -H "Referer: https://arsiv.mackolik.com/Mac/${MAC_ID}/" \
+              "$URL")
+
+            STATUS=$(echo "$RESP" | grep "HTTP_STATUS" | cut -d: -f2)
+            BODY=$(echo "$RESP" | grep -v "HTTP_STATUS")
+            LEN=${#BODY}
+
+            echo "HTTP $STATUS | ${LEN} byte | ilk 120 karakter: ${BODY:0:120}"
+            sleep 1
+          done
