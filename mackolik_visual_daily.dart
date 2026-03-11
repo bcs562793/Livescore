@@ -34,7 +34,23 @@ class _CookieClient {
   void close() => _client.close();
 }
 
-// ─── Fuzzy name matching (worker'dakiyle aynı mantık) ──────────────────────
+// ─── Token yenileme gerekiyor mu? ──────────────────────────────────────────
+// visual_url boşsa VEYA visual_expires_at 30 dk'dan az kaldıysa → yenile
+bool _shouldRefresh(String? visualUrl, String? expiresAtStr) {
+  if (visualUrl == null || visualUrl.isEmpty) return true;
+  if (expiresAtStr == null) return true;
+
+  try {
+    final expiresAt = DateTime.parse(expiresAtStr).toUtc();
+    final remaining = expiresAt.difference(DateTime.now().toUtc());
+    // 30 dakikadan az kaldıysa yenile
+    return remaining.inMinutes < 30;
+  } catch (_) {
+    return true; // parse hatası → yenile
+  }
+}
+
+// ─── Fuzzy name matching ────────────────────────────────────────────────────
 double _matchScore(String a, String b) {
   a = _normalize(a);
   b = _normalize(b);
@@ -62,7 +78,7 @@ String _normalize(String s) {
       .trim();
 }
 
-// ─── Visual URL fetch (mackolik_visual_test.dart'tan) ─────────────────────
+// ─── Visual URL fetch ───────────────────────────────────────────────────────
 Future<String?> fetchVisualUrl(int mackolikId, _CookieClient client) async {
   try {
     final pageUrl = 'https://arsiv.mackolik.com/Mac/$mackolikId/';
@@ -74,18 +90,16 @@ Future<String?> fetchVisualUrl(int mackolikId, _CookieClient client) async {
     }
 
     final body = page.body;
+    print('   🔍 Body length: ${body.length}');
+    print('   🔍 Body snippet: ${body.substring(0, body.length.clamp(0, 500))}');
 
-// DEBUG: rbid için farklı pattern'ları dene
-print('   🔍 Body length: ${body.length}');
-print('   🔍 Body snippet: ${body.substring(0, body.length.clamp(0, 500))}');
+    final rbid =
+        RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body)?.group(1) ??
+        RegExp(r'rbid=(\d+)').firstMatch(body)?.group(1) ??
+        RegExp(r'"rbid"\s*:\s*"?(\d+)"?').firstMatch(body)?.group(1) ??
+        RegExp(r'performgroup\.com[^"]*rbid=(\d+)').firstMatch(body)?.group(1) ??
+        RegExp(r'customerId=mackolik[^"]*[&?]rbid=(\d+)').firstMatch(body)?.group(1);
 
-// Daha geniş pattern'lar dene
-final rbid =
-    RegExp(r'getMatchCast\s*\(\s*(\d+)').firstMatch(body)?.group(1) ??
-    RegExp(r'rbid=(\d+)').firstMatch(body)?.group(1) ??
-    RegExp(r'"rbid"\s*:\s*"?(\d+)"?').firstMatch(body)?.group(1) ??
-    RegExp(r'performgroup\.com[^"]*rbid=(\d+)').firstMatch(body)?.group(1) ??
-    RegExp(r'customerId=mackolik[^"]*[&?]rbid=(\d+)').firstMatch(body)?.group(1);
     if (rbid == null) {
       print('   ❌ rbid bulunamadı for mackolikId=$mackolikId');
       return null;
@@ -145,13 +159,13 @@ void main() async {
 
   final supabase = SupabaseClient(supabaseUrl, supabaseKey);
 
-  // ── 1. Bugünün tarihini al (DD/MM/YYYY) ──────────────────────────────────
+  // ── 1. Bugünün tarihini al ────────────────────────────────────────────────
   final now = DateTime.now().toUtc();
   final dateStr =
       '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
   print('📅 Tarih: $dateStr\n');
 
-  // ── 2. Mackolik günün maç listesini çek ──────────────────────────────────
+  // ── 2. Mackolik maç listesini çek ─────────────────────────────────────────
   print('📡 Mackolik livedata çekiliyor...');
   final mackolikResp = await http.get(
     Uri.parse('https://vd.mackolik.com/livedata?date=$dateStr'),
@@ -168,17 +182,10 @@ void main() async {
   }
 
   final mackolikData = jsonDecode(mackolikResp.body) as Map;
-  print('   🔍 Top-level keys: ${mackolikData.keys.toList()}');
-
-  // m direkt maç listesi
-  final rawList = (mackolikData['m'] as List? ?? mackolikData['d'] as List? ?? []);
+  final rawList =
+      (mackolikData['m'] as List? ?? mackolikData['d'] as List? ?? []);
   print('   ${rawList.length} raw eleman bulundu');
-  if (rawList.isNotEmpty) {
-    print('   🔍 İlk eleman tipi: ${rawList[0].runtimeType}');
-    print('   🔍 İlk eleman: ${rawList[0]}');
-  }
 
-  // Her eleman bir List: [0]=id, [2]=home, [4]=away
   final mackolikMatches = <Map<String, dynamic>>[];
   for (final item in rawList) {
     if (item is List && item.length >= 5) {
@@ -195,41 +202,44 @@ void main() async {
     }
   }
   print('   ${mackolikMatches.length} parse edilebilir maç\n');
-  if (mackolikMatches.isNotEmpty) {
-    print('   🔍 Örnek: ${mackolikMatches[0]}');
-  }
 
-  // ── 3. Supabase'den bugünün live_matches'ini çek ──────────────────────────
+  // ── 3. Supabase'den maçları çek (visual_expires_at dahil) ────────────────
   print('📡 Supabase live_matches çekiliyor...');
-  // match_date yok — visual_url'si null olan TÜM maçları al
-  /// YENİ:
-    final dbMatches = await supabase
-    .from('live_matches')
-    .select('fixture_id, home_team, away_team, visual_url')
-    .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'NS']);
+  final dbMatches = await supabase
+      .from('live_matches')
+      .select('fixture_id, home_team, away_team, visual_url, visual_expires_at')
+      .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE', 'NS']);
 
   print('   ${(dbMatches as List).length} Supabase maç bulundu\n');
 
-  // ── 4. Eşleştirme ─────────────────────────────────────────────────────────
+  // ── 4. Eşleştirme & URL yenileme ──────────────────────────────────────────
   print('🔗 Eşleştirme yapılıyor...\n');
 
   final client = _CookieClient();
-  // Session cookie'yi kur
   await client.get('https://arsiv.mackolik.com/',
       referer: 'https://www.google.com/');
 
-  int matched = 0, saved = 0, skipped = 0, failed = 0;
+  int matched = 0, saved = 0, skipped = 0, failed = 0, refreshed = 0;
 
   for (final dbMatch in dbMatches) {
-    final fixtureId = dbMatch['fixture_id'] as int;
-    final homeTeam = dbMatch['home_team'] as String? ?? '';
-    final awayTeam = dbMatch['away_team'] as String? ?? '';
-    final existingUrl = dbMatch['visual_url'] as String?;
+    final fixtureId    = dbMatch['fixture_id'] as int;
+    final homeTeam     = dbMatch['home_team'] as String? ?? '';
+    final awayTeam     = dbMatch['away_team'] as String? ?? '';
+    final existingUrl  = dbMatch['visual_url'] as String?;
+    final expiresAtStr = dbMatch['visual_expires_at'] as String?;
 
-    // Zaten visual_url varsa atla
-    if (existingUrl != null && existingUrl.isNotEmpty) {
+    // ── Token hâlâ geçerliyse atla ────────────────────────────────────────
+    if (!_shouldRefresh(existingUrl, expiresAtStr)) {
+      final expiresAt = DateTime.parse(expiresAtStr!).toUtc();
+      final remaining = expiresAt.difference(DateTime.now().toUtc()).inMinutes;
+      print('   ⏭ Atlandı: $homeTeam vs $awayTeam ($remaining dk kaldı)');
       skipped++;
       continue;
+    }
+
+    final isRenew = existingUrl != null && existingUrl.isNotEmpty;
+    if (isRenew) {
+      print('   🔄 Yenileniyor: $homeTeam vs $awayTeam (token süresi dolmuş)');
     }
 
     // En iyi eşleşmeyi bul
@@ -256,7 +266,7 @@ void main() async {
     final mackolikId = bestMatch['id'] as int;
     print('   ✅ $homeTeam vs $awayTeam → mackolik:$mackolikId (score: ${bestScore.toStringAsFixed(2)})');
 
-    // ── 5. Visual URL çek ──────────────────────────────────────────────────
+    // ── 5. Visual URL çek ─────────────────────────────────────────────────
     final visualUrl = await fetchVisualUrl(mackolikId, client);
     if (visualUrl == null) {
       failed++;
@@ -275,14 +285,19 @@ void main() async {
                 .toIso8601String(),
           })
           .eq('fixture_id', fixtureId);
-      print('   💾 Kaydedildi: fixture=$fixtureId');
-      saved++;
+
+      if (isRenew) {
+        print('   🔄 Token yenilendi: fixture=$fixtureId');
+        refreshed++;
+      } else {
+        print('   💾 Yeni kaydedildi: fixture=$fixtureId');
+        saved++;
+      }
     } catch (e) {
       print('   ❌ Supabase yazma hatası: $e');
       failed++;
     }
 
-    // Rate limit için kısa bekleme
     await Future.delayed(const Duration(milliseconds: 500));
   }
 
@@ -290,9 +305,9 @@ void main() async {
 
   print('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   print('📊 Özet:');
-  print('   Eşleşen:  $matched');
-  print('   Kaydeden: $saved');
-  print('   Atlanan:  $skipped (zaten var)');
-  print('   Başarısız: $failed');
+  print('   Yeni kaydedilen:  $saved');
+  print('   Token yenilenen:  $refreshed');
+  print('   Atlanan (geçerli): $skipped');
+  print('   Eşleşemeyen:      $failed');
   print('✅ Tamamlandı.');
 }
