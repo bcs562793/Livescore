@@ -2,8 +2,9 @@ name: Mackolik Visual Daily Sync
 
 on:
   schedule:
-    - cron: '0 6 * * *'   # Her gün 06:00 UTC (09:00 Türkiye)
-  workflow_dispatch:        # Manuel tetikleme
+    - cron: '0 0,7,14,21 * * *'    # 00:00, 07:00, 14:00, 21:00 UTC
+    - cron: '30 3,10,17 * * *'     # 03:30, 10:30, 17:30 UTC
+  workflow_dispatch:               # Manuel tetikleme
 
 jobs:
   sync:
