@@ -2,13 +2,18 @@ name: Shopier Kredi Yükleme
 
 on:
   schedule:
-    - cron: '0 * * * *'  # Her saat başı
-  workflow_dispatch:       # Manuel tetikleme için
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   check-orders:
     runs-on: ubuntu-latest
     steps:
+      - name: Playwright Kur
+        run: |
+          npm i playwright
+          npx playwright install chromium --with-deps
+
       - name: Shopier Siparişlerini Kontrol Et
         env:
           SHOPIER_EMAIL:             ${{ secrets.SHOPIER_EMAIL }}
@@ -16,286 +21,159 @@ jobs:
           SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          node << 'EOF'
+          node << 'SCRIPT'
+          const { chromium } = require('playwright');
           const https = require('https');
-          const http  = require('http');
-          const qs    = require('querystring');
 
-          /* ── YARDIMCI: HTTP/HTTPS istek ── */
-          function request(options, postData) {
+          /* ═══════════════════════════════════════════
+             SUPABASE YARDIMCI FONKSİYONLAR
+             ═══════════════════════════════════════════ */
+
+          function supabaseRequest(method, path, body) {
             return new Promise((resolve, reject) => {
-              const mod = options.protocol === 'http:' ? http : https;
-              const req = mod.request(options, res => {
-                const cookies = (res.headers['set-cookie'] || [])
-                  .map(c => c.split(';')[0]).join('; ');
-
-                /* Redirect takip et */
-                if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
-                  const loc  = new URL(res.headers.location, `https://${options.hostname}`);
-                  const opts = {
-                    protocol: loc.protocol,
-                    hostname: loc.hostname,
-                    path:     loc.pathname + loc.search,
-                    method:   'GET',
-                    headers:  {
-                      'Cookie':     cookies || options.headers?.Cookie || '',
-                      'User-Agent': options.headers?.['User-Agent'] || 'Mozilla/5.0',
-                      'Referer':    `https://${options.hostname}${options.path}`,
-                    },
-                  };
-                  return request(opts).then(r => resolve({
-                    ...r,
-                    cookies: [cookies, r.cookies].filter(Boolean).join('; '),
-                  })).catch(reject);
-                }
-
-                let body = '';
-                res.on('data', d => body += d);
-                res.on('end', () => resolve({ status: res.statusCode, body, cookies, headers: res.headers }));
-              });
-              req.on('error', reject);
-              if (postData) req.write(postData);
-              req.end();
-            });
-          }
-
-          /* ── Cookie birleştirici ── */
-          function mergeCookies(...parts) {
-            const map = {};
-            parts.filter(Boolean).forEach(str => {
-              str.split(';').forEach(pair => {
-                const [k, ...v] = pair.trim().split('=');
-                if (k && v.length) map[k.trim()] = v.join('=').trim();
-              });
-            });
-            return Object.entries(map).map(([k, v]) => `${k}=${v}`).join('; ');
-          }
-
-          /* ── 1. SHOPIER LOGIN (CSRF TOKEN DESTEKLİ) ── */
-          async function shopierLogin() {
-            /* --- Adım 1: GET /account/login → CSRF token + session cookie al --- */
-            console.log('   GET /account/login ...');
-            const getRes = await request({
-              hostname: 'www.shopier.com',
-              path:     '/account/login',
-              method:   'GET',
-              headers:  {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept':     'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-              },
-            });
-
-            console.log('   GET status:', getRes.status);
-            const sessionCookies = getRes.cookies || '';
-
-            /* CSRF token parse */
-            const tokenMatch = getRes.body.match(/name="_token"\s+value="([^"]+)"/i)
-                            || getRes.body.match(/name="csrf[_-]?token"\s+value="([^"]+)"/i)
-                            || getRes.body.match(/<meta\s+name="csrf-token"\s+content="([^"]+)"/i);
-
-            const csrfToken = tokenMatch ? tokenMatch[1] : '';
-            console.log('   CSRF token:', csrfToken ? `${csrfToken.slice(0, 10)}...` : 'BULUNAMADI');
-
-            /* --- Adım 2: POST /account/login --- */
-            const postFields = {
-              email:    process.env.SHOPIER_EMAIL,
-              password: process.env.SHOPIER_PASSWORD,
-              remember: '1',
-            };
-            if (csrfToken) postFields._token = csrfToken;
-
-            const postData = qs.stringify(postFields);
-
-            const postRes = await request({
-              hostname: 'www.shopier.com',
-              path:     '/account/login',
-              method:   'POST',
-              headers:  {
-                'Content-Type':    'application/x-www-form-urlencoded',
-                'Content-Length':  Buffer.byteLength(postData),
-                'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer':         'https://www.shopier.com/account/login',
-                'Origin':          'https://www.shopier.com',
-                'Cookie':          sessionCookies,
-              },
-            }, postData);
-
-            console.log('   POST status:', postRes.status);
-
-            const allCookies = mergeCookies(sessionCookies, postRes.cookies);
-            if (!allCookies) throw new Error('Cookie alınamadı');
-
-            /* Login başarı kontrolü — 403 veya login sayfasına dönüş varsa hata */
-            if (postRes.status === 403) {
-              console.error('   Response body (ilk 500):', postRes.body.slice(0, 500));
-              throw new Error('403 Forbidden — Shopier isteği reddetti (Cloudflare/WAF olabilir)');
-            }
-            if (postRes.status === 422) {
-              throw new Error('422 — CSRF token geçersiz veya form alanları eksik');
-            }
-
-            return allCookies;
-          }
-
-          /* ── 2. SİPARİŞLER SAYFASI ── */
-          async function fetchOrders(cookies) {
-            const res = await request({
-              hostname: 'www.shopier.com',
-              path:     '/account/orders',
-              method:   'GET',
-              headers:  {
-                'Cookie':          cookies,
-                'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer':         'https://www.shopier.com/account',
-              },
-            });
-            return res.body;
-          }
-
-          /* ── 3. SİPARİŞ DETAYI ── */
-          async function fetchOrderDetail(cookies, orderId) {
-            const res = await request({
-              hostname: 'www.shopier.com',
-              path:     `/account/orders/${orderId}`,
-              method:   'GET',
-              headers:  {
-                'Cookie':          cookies,
-                'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Referer':         'https://www.shopier.com/account/orders',
-              },
-            });
-            return res.body;
-          }
-
-          /* ── 4. SİPARİŞ LİSTESİ PARSE ── */
-          function parseOrderIds(html) {
-            const ids = [...new Set(
-              [...html.matchAll(/\/account\/orders\/(\d+)/g)].map(m => m[1])
-            )];
-            return ids.slice(0, 20);
-          }
-
-          /* ── 5. SİPARİŞ DETAY PARSE ── */
-          function parseOrderDetail(html, orderId) {
-            /* Ödeme durumu */
-            const isPaid = /Ödendi|Tamamlandı|tamamlandi|paid|success|completed/i.test(html);
-
-            /* Email */
-            const emailRe = /([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
-            const emails  = [...html.matchAll(emailRe)].map(m => m[1]);
-            const email   = emails.find(e => !e.includes('shopier.com')) || '';
-
-            /* Müşteri notu */
-            const noteMatch = html.match(/[Mm]ü[şs]teri\s*[Nn]otu[\s\S]{0,50}?<[^>]+>([^<]{3,100})/);
-            const note      = noteMatch ? noteMatch[1].trim() : '';
-
-            /* Tutar */
-            const amountMatch = html.match(/([\d]+[.,]\d{2})\s*(?:TL|₺)/);
-            const amount      = amountMatch ? parseFloat(amountMatch[1].replace(',', '.')) : 0;
-
-            /* Üründen kredi miktarı */
-            const creditMatch = html.match(/(\d+)\s*[Kk]redi/);
-            const credits     = creditMatch ? parseInt(creditMatch[1]) : 0;
-
-            return { orderId, email, note, amount, credits, isPaid };
-          }
-
-          /* ── 6. KREDİ MİKTARI BELİRLE ── */
-          function resolveCredits(order) {
-            if (order.credits) return order.credits;
-            const a = order.amount;
-            if (a <= 1)   return 100;
-            if (a <= 29)  return 100;
-            if (a <= 79)  return 320;
-            if (a <= 179) return 825;
-            if (a <= 399) return 2300;
-            return 0;
-          }
-
-          /* ── 7. İŞLENMİŞ Mİ? (Supabase kontrol) ── */
-          async function isAlreadyProcessed(orderId) {
-            return new Promise((resolve, reject) => {
-              const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/credit_purchases`);
-              url.searchParams.set('shopier_payment_id', `eq.${orderId}`);
-              url.searchParams.set('select', 'id');
-
-              const req = https.request({
+              const url = new URL(process.env.SUPABASE_URL + path);
+              const opts = {
                 hostname: url.hostname,
                 path:     url.pathname + url.search,
-                method:   'GET',
-                headers:  {
+                method,
+                headers: {
                   'apikey':        process.env.SUPABASE_SERVICE_ROLE_KEY,
                   'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+                  'Content-Type':  'application/json',
                 },
-              }, res => {
+              };
+              const req = https.request(opts, res => {
                 let data = '';
                 res.on('data', d => data += d);
-                res.on('end', () => {
-                  try { resolve(JSON.parse(data).length > 0); }
-                  catch { resolve(false); }
-                });
+                res.on('end', () => resolve({ status: res.statusCode, body: data }));
               });
               req.on('error', reject);
+              if (body) {
+                const b = JSON.stringify(body);
+                req.setHeader('Content-Length', Buffer.byteLength(b));
+                req.write(b);
+              }
               req.end();
             });
           }
 
-          /* ── 8. KREDİ YÜKLE (Supabase RPC) ── */
+          async function isAlreadyProcessed(orderId) {
+            const res = await supabaseRequest(
+              'GET',
+              `/rest/v1/credit_purchases?shopier_payment_id=eq.${orderId}&select=id`
+            );
+            try { return JSON.parse(res.body).length > 0; }
+            catch { return false; }
+          }
+
           async function addCredits(email, credits, orderId) {
-            const body = JSON.stringify({
+            return supabaseRequest('POST', '/rest/v1/rpc/add_credits_by_email', {
               p_email:       email,
               p_amount:      credits,
               p_session_id:  null,
               p_description: `Shopier sipariş #${orderId}`,
               p_order_id:    String(orderId),
             });
-
-            return new Promise((resolve, reject) => {
-              const url = new URL(`${process.env.SUPABASE_URL}/rest/v1/rpc/add_credits_by_email`);
-              const req = https.request({
-                hostname: url.hostname,
-                path:     url.pathname,
-                method:   'POST',
-                headers:  {
-                  'Content-Type':   'application/json',
-                  'Content-Length': Buffer.byteLength(body),
-                  'apikey':        process.env.SUPABASE_SERVICE_ROLE_KEY,
-                  'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
-                },
-              }, res => {
-                let data = '';
-                res.on('data', d => data += d);
-                res.on('end', () => resolve({ status: res.statusCode, body: data }));
-              });
-              req.on('error', reject);
-              req.write(body);
-              req.end();
-            });
           }
 
-          /* ── ANA AKIŞ ── */
+          /* ═══════════════════════════════════════════
+             KREDİ MİKTARI
+             ═══════════════════════════════════════════ */
+
+          function resolveCredits(amount, productCredits) {
+            if (productCredits) return productCredits;
+            if (amount <= 1)   return 100;
+            if (amount <= 29)  return 100;
+            if (amount <= 79)  return 320;
+            if (amount <= 179) return 825;
+            if (amount <= 399) return 2300;
+            return 0;
+          }
+
+          /* ═══════════════════════════════════════════
+             ANA AKIŞ — PLAYWRIGHT
+             ═══════════════════════════════════════════ */
+
           (async () => {
+            let browser;
             try {
-              console.log('🔐 Shopier\'a giriş yapılıyor...');
-              const cookies = await shopierLogin();
+              console.log('🚀 Tarayıcı başlatılıyor...');
+              browser = await chromium.launch({
+                headless: true,
+                args: [
+                  '--no-sandbox',
+                  '--disable-setuid-sandbox',
+                  '--disable-blink-features=AutomationControlled',
+                ],
+              });
+
+              const context = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                locale: 'tr-TR',
+                viewport: { width: 1280, height: 800 },
+              });
+
+              const page = await context.newPage();
+
+              /* ── 1. LOGIN ── */
+              console.log('🔐 Shopier login sayfasına gidiliyor...');
+              await page.goto('https://www.shopier.com/account/login', {
+                waitUntil: 'networkidle',
+                timeout: 60000,
+              });
+
+              /* Cloudflare challenge varsa bekle */
+              await page.waitForTimeout(5000);
+
+              console.log('   Sayfa URL:', page.url());
+              console.log('   Sayfa title:', await page.title());
+
+              /* Email & password doldur */
+              await page.fill('input[name="email"], input[type="email"]', process.env.SHOPIER_EMAIL);
+              await page.fill('input[name="password"], input[type="password"]', process.env.SHOPIER_PASSWORD);
+
+              /* Kısa bekleme — insan davranışı simüle */
+              await page.waitForTimeout(1000);
+
+              /* Submit */
+              await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
+                page.click('button[type="submit"], input[type="submit"]'),
+              ]);
+
+              console.log('   Login sonrası URL:', page.url());
+
+              /* Login başarılı mı? */
+              if (page.url().includes('/login')) {
+                const bodyText = await page.textContent('body');
+                console.error('   Sayfa içeriği (ilk 500):', bodyText.slice(0, 500));
+                throw new Error('Login başarısız — hâlâ login sayfasında');
+              }
+
               console.log('✅ Giriş başarılı');
 
-              console.log('📦 Siparişler alınıyor...');
-              const ordersHtml = await fetchOrders(cookies);
-              const orderIds   = parseOrderIds(ordersHtml);
+              /* ── 2. SİPARİŞLER SAYFASI ── */
+              console.log('📦 Siparişler sayfasına gidiliyor...');
+              await page.goto('https://www.shopier.com/account/orders', {
+                waitUntil: 'networkidle',
+                timeout: 30000,
+              });
+
+              /* Sipariş ID'lerini çek */
+              const orderIds = await page.evaluate(() => {
+                const links = [...document.querySelectorAll('a[href*="/account/orders/"]')];
+                const ids = links
+                  .map(a => a.href.match(/\/account\/orders\/(\d+)/))
+                  .filter(Boolean)
+                  .map(m => m[1]);
+                return [...new Set(ids)].slice(0, 20);
+              });
+
               console.log(`📋 ${orderIds.length} sipariş bulundu:`, orderIds);
 
-              let processed = 0;
-              let skipped   = 0;
-              let errors    = 0;
+              let processed = 0, skipped = 0, errors = 0;
 
+              /* ── 3. HER SİPARİŞİ İŞLE ── */
               for (const orderId of orderIds) {
                 try {
                   const alreadyDone = await isAlreadyProcessed(orderId);
@@ -305,8 +183,32 @@ jobs:
                     continue;
                   }
 
-                  const detailHtml = await fetchOrderDetail(cookies, orderId);
-                  const order      = parseOrderDetail(detailHtml, orderId);
+                  await page.goto(`https://www.shopier.com/account/orders/${orderId}`, {
+                    waitUntil: 'networkidle',
+                    timeout: 20000,
+                  });
+
+                  const order = await page.evaluate((oid) => {
+                    const text = document.body.innerText || '';
+                    const html = document.body.innerHTML || '';
+
+                    const isPaid = /Ödendi|Tamamlandı|tamamlandi|paid|success|completed/i.test(text);
+
+                    const emailRe = /([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g;
+                    const emails  = [...text.matchAll(emailRe)].map(m => m[1]);
+                    const email   = emails.find(e => !e.includes('shopier.com')) || '';
+
+                    const noteMatch = html.match(/[Mm]ü[şs]teri\s*[Nn]otu[\s\S]{0,50}?<[^>]+>([^<]{3,100})/);
+                    const note      = noteMatch ? noteMatch[1].trim() : '';
+
+                    const amountMatch = text.match(/([\d]+[.,]\d{2})\s*(?:TL|₺)/);
+                    const amount      = amountMatch ? parseFloat(amountMatch[1].replace(',', '.')) : 0;
+
+                    const creditMatch = text.match(/(\d+)\s*[Kk]redi/);
+                    const credits     = creditMatch ? parseInt(creditMatch[1]) : 0;
+
+                    return { orderId: oid, email, note, amount, credits, isPaid };
+                  }, orderId);
 
                   console.log(`📄 #${orderId} → isPaid:${order.isPaid} email:"${order.email}" note:"${order.note}" amount:${order.amount}`);
 
@@ -316,7 +218,6 @@ jobs:
                     continue;
                   }
 
-                  /* Email: önce müşteri notundan, sonra sayfadan */
                   const customerEmail = order.note.includes('@')
                     ? order.note.trim()
                     : order.email;
@@ -327,7 +228,7 @@ jobs:
                     continue;
                   }
 
-                  const credits = resolveCredits(order);
+                  const credits = resolveCredits(order.amount, order.credits);
                   if (!credits) {
                     console.warn(`⚠️  #${orderId}: kredi miktarı belirlenemedi (tutar: ${order.amount})`);
                     errors++;
@@ -344,15 +245,17 @@ jobs:
                     errors++;
                   }
                 } catch (orderErr) {
-                  console.error(`❌ #${orderId} işlenirken hata:`, orderErr.message);
+                  console.error(`❌ #${orderId} hata:`, orderErr.message);
                   errors++;
                 }
               }
 
               console.log(`\n✅ Tamamlandı — İşlenen: ${processed} | Atlanan: ${skipped} | Hata: ${errors}`);
             } catch (err) {
-              console.error('❌ Hata:', err.message);
+              console.error('❌ Genel hata:', err.message);
               process.exit(1);
+            } finally {
+              if (browser) await browser.close();
             }
           })();
-          EOF
+          SCRIPT
