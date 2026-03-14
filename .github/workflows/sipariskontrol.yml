@@ -118,12 +118,12 @@ jobs:
               /* ── 1. LOGIN ── */
               console.log('🔐 Shopier login sayfasına gidiliyor...');
               await page.goto('https://www.shopier.com/account/login', {
-                waitUntil: 'networkidle',
-                timeout: 60000,
+                waitUntil: 'domcontentloaded',
+                timeout: 90000,
               });
 
               /* Cloudflare challenge varsa bekle */
-              await page.waitForTimeout(5000);
+              await page.waitForTimeout(8000);
 
               console.log('   Sayfa URL:', page.url());
               console.log('   Sayfa title:', await page.title());
@@ -133,13 +133,16 @@ jobs:
               await page.fill('input[name="password"], input[type="password"]', process.env.SHOPIER_PASSWORD);
 
               /* Kısa bekleme — insan davranışı simüle */
-              await page.waitForTimeout(1000);
+              await page.waitForTimeout(1500);
 
               /* Submit */
               await Promise.all([
-                page.waitForNavigation({ waitUntil: 'networkidle', timeout: 30000 }).catch(() => {}),
+                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {}),
                 page.click('button[type="submit"], input[type="submit"]'),
               ]);
+
+              /* Login sonrası Cloudflare geçişi için ekstra bekle */
+              await page.waitForTimeout(5000);
 
               console.log('   Login sonrası URL:', page.url());
 
@@ -155,9 +158,11 @@ jobs:
               /* ── 2. SİPARİŞLER SAYFASI ── */
               console.log('📦 Siparişler sayfasına gidiliyor...');
               await page.goto('https://www.shopier.com/account/orders', {
-                waitUntil: 'networkidle',
-                timeout: 30000,
+                waitUntil: 'domcontentloaded',
+                timeout: 60000,
               });
+
+              await page.waitForTimeout(3000);
 
               /* Sipariş ID'lerini çek */
               const orderIds = await page.evaluate(() => {
@@ -184,9 +189,11 @@ jobs:
                   }
 
                   await page.goto(`https://www.shopier.com/account/orders/${orderId}`, {
-                    waitUntil: 'networkidle',
-                    timeout: 20000,
+                    waitUntil: 'domcontentloaded',
+                    timeout: 30000,
                   });
+
+                  await page.waitForTimeout(2000);
 
                   const order = await page.evaluate((oid) => {
                     const text = document.body.innerText || '';
