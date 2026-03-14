@@ -9,9 +9,13 @@ jobs:
   check-orders:
     runs-on: ubuntu-latest
     steps:
-      - name: Playwright Kur
+      - name: Bağımlılıkları Kur
         run: |
-          npm i playwright
+          # Stealth plugin için puppeteer-extra tabanlı kurulum
+          npm i \
+            playwright-extra \
+            puppeteer-extra-plugin-stealth \
+            playwright
           npx playwright install chromium --with-deps
 
       - name: Shopier Siparişlerini Kontrol Et
@@ -22,8 +26,12 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           node << 'SCRIPT'
-          const { chromium } = require('playwright');
+          const { chromium } = require('playwright-extra');
+          const StealthPlugin  = require('puppeteer-extra-plugin-stealth');
           const https = require('https');
+
+          /* Stealth plugin — headless tespitini engeller */
+          chromium.use(StealthPlugin());
 
           /* ═══════════════════════════════════════════
              SUPABASE YARDIMCI FONKSİYONLAR
@@ -95,8 +103,8 @@ jobs:
              ═══════════════════════════════════════════ */
 
           async function waitForCloudflare(page, label = '') {
-            console.log(`   [CF] ${label} — Cloudflare kontrolü başladı`);
-            const maxWait = 45000;
+            console.log(`   [CF] ${label} — kontrol başladı`);
+            const maxWait = 60000;
             const interval = 2000;
             let elapsed = 0;
 
@@ -107,15 +115,16 @@ jobs:
 
               const isCF = /bir dakika|just a moment|checking your browser|please wait/i.test(title);
               if (!isCF) {
-                console.log(`   [CF] ✅ Challenge geçildi (${elapsed / 1000}s)`);
-                return;
+                console.log(`   [CF] ✅ Geçildi (${elapsed / 1000}s)`);
+                return true;
               }
 
               await page.waitForTimeout(interval);
               elapsed += interval;
             }
 
-            console.warn(`   [CF] ⚠️ ${maxWait / 1000}s sonunda hâlâ Cloudflare sayfasında — devam ediliyor`);
+            console.warn(`   [CF] ⚠️ ${maxWait / 1000}s'de hâlâ Cloudflare sayfasında`);
+            return false;
           }
 
           /* ═══════════════════════════════════════════
@@ -129,35 +138,35 @@ jobs:
               const body   = await page.textContent('body').catch(() => '');
               const inputs = await page.evaluate(() =>
                 [...document.querySelectorAll('input')].map(i => ({
-                  name: i.name, type: i.type, id: i.id, placeholder: i.placeholder
+                  name: i.name, type: i.type, id: i.id, visible: i.offsetParent !== null
                 }))
               ).catch(() => []);
               console.log(`\n📋 [${label}]`);
               console.log(`   URL   : ${url}`);
               console.log(`   Title : ${title}`);
               console.log(`   Inputs: ${JSON.stringify(inputs)}`);
-              console.log(`   Body (ilk 400): ${body.slice(0, 400).replace(/\s+/g, ' ')}`);
+              console.log(`   Body  : ${body.slice(0, 500).replace(/\s+/g, ' ')}`);
             } catch (e) {
               console.log(`   [${label}] logPageState hata: ${e.message}`);
             }
           }
 
           /* ═══════════════════════════════════════════
-             ANA AKIŞ — PLAYWRIGHT
+             ANA AKIŞ — PLAYWRIGHT-EXTRA + STEALTH
              ═══════════════════════════════════════════ */
 
           (async () => {
             let browser;
             try {
-              console.log('🚀 Tarayıcı başlatılıyor...');
+              console.log('🚀 Tarayıcı başlatılıyor (stealth modu)...');
               browser = await chromium.launch({
                 headless: true,
+                executablePath: require('playwright').chromium.executablePath(),
                 args: [
                   '--no-sandbox',
                   '--disable-setuid-sandbox',
                   '--disable-dev-shm-usage',
-                  '--disable-blink-features=AutomationControlled',
-                  '--disable-web-security',
+                  '--disable-gpu',
                   '--lang=tr-TR,tr',
                 ],
               });
@@ -174,90 +183,89 @@ jobs:
 
               const page = await context.newPage();
 
-              /* ── Tüm browser loglarını yakala ── */
-              page.on('console', msg => console.log(`   [browser:${msg.type()}] ${msg.text()}`));
-              page.on('pageerror', err => console.log(`   [browser:error] ${err.message}`));
+              /* Browser loglarını yakala */
+              page.on('console', msg => {
+                const t = msg.type();
+                if (['error', 'warning'].includes(t)) {
+                  console.log(`   [browser:${t}] ${msg.text()}`);
+                }
+              });
+              page.on('pageerror', err => console.log(`   [page:error] ${err.message}`));
               page.on('response', res => {
                 if (res.status() >= 400) {
-                  console.log(`   [http:${res.status()}] ${res.url()}`);
+                  console.log(`   [http:${res.status()}] ${res.url().slice(0, 100)}`);
                 }
               });
 
               /* ── 1. LOGIN ── */
-              console.log('\n🔐 Shopier login sayfasına gidiliyor...');
+              console.log('\n🔐 Login sayfasına gidiliyor...');
               await page.goto('https://www.shopier.com/account/login', {
                 waitUntil: 'domcontentloaded',
                 timeout: 90000,
               });
 
-              /* Cloudflare geçişini bekle */
-              await waitForCloudflare(page, 'LOGIN');
-              await logPageState(page, 'LOGIN SONRASI');
+              const cfPassed = await waitForCloudflare(page, 'LOGIN');
+              await logPageState(page, 'CF SONRASI');
 
-              /* Email input görünene kadar bekle (max 45s) */
+              if (!cfPassed) {
+                throw new Error('Cloudflare aşılamadı — headless IP engelinde olabilir. Self-hosted runner deneyin.');
+              }
+
+              /* Email input bekle */
               console.log('\n   Email input bekleniyor...');
               try {
                 await page.waitForSelector(
                   'input[name="email"], input[type="email"]',
-                  { timeout: 45000, state: 'visible' }
+                  { timeout: 30000, state: 'visible' }
                 );
                 console.log('   ✅ Email input görünür');
               } catch (e) {
-                await logPageState(page, 'EMAIL INPUT BULUNAMADI');
+                await logPageState(page, 'EMAIL INPUT YOK');
                 throw new Error(`Email input bulunamadı: ${e.message}`);
               }
 
-              /* Email & password doldur */
+              /* Formu doldur */
               console.log('   Email dolduruluyor...');
               await page.fill('input[name="email"], input[type="email"]', process.env.SHOPIER_EMAIL);
-              await page.waitForTimeout(800);
+              await page.waitForTimeout(700);
 
               console.log('   Şifre dolduruluyor...');
               await page.fill('input[name="password"], input[type="password"]', process.env.SHOPIER_PASSWORD);
-              await page.waitForTimeout(1500);
+              await page.waitForTimeout(1200);
 
-              /* Submit butonunu kontrol et */
+              /* Submit */
               const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
               if (!submitBtn) {
-                await logPageState(page, 'SUBMIT BUTON YOK');
+                await logPageState(page, 'SUBMIT YOK');
                 throw new Error('Submit butonu bulunamadı');
               }
-              const btnText = await submitBtn.textContent().catch(() => '');
-              console.log(`   Submit buton metni: "${btnText.trim()}"`);
-
-              /* Form gönder */
               console.log('   Form gönderiliyor...');
               await Promise.all([
-                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e => {
-                  console.log(`   Navigation zaman aşımı (normal olabilir): ${e.message}`);
-                }),
-                page.click('button[type="submit"], input[type="submit"]'),
+                page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(e =>
+                  console.log(`   Navigation timeout (normal olabilir): ${e.message}`)
+                ),
+                submitBtn.click(),
               ]);
 
-              /* Login sonrası Cloudflare geçişi */
               await waitForCloudflare(page, 'POST-LOGIN');
               await page.waitForTimeout(2000);
-              await logPageState(page, 'LOGIN SUBMIT SONRASI');
+              await logPageState(page, 'LOGIN SONRASI');
 
-              /* Login başarılı mı? */
               if (page.url().includes('/login')) {
                 throw new Error('Login başarısız — hâlâ login sayfasında');
               }
+              console.log('\n✅ Giriş başarılı:', page.url());
 
-              console.log('\n✅ Giriş başarılı — URL:', page.url());
-
-              /* ── 2. SİPARİŞLER SAYFASI ── */
+              /* ── 2. SİPARİŞLER ── */
               console.log('\n📦 Siparişler sayfasına gidiliyor...');
               await page.goto('https://www.shopier.com/account/orders', {
                 waitUntil: 'domcontentloaded',
                 timeout: 60000,
               });
-
               await waitForCloudflare(page, 'SİPARİŞLER');
-              await page.waitForTimeout(3000);
-              await logPageState(page, 'SİPARİŞLER SAYFASI');
+              await page.waitForTimeout(2000);
+              await logPageState(page, 'SİPARİŞLER');
 
-              /* Sipariş ID'lerini çek */
               const orderIds = await page.evaluate(() => {
                 const links = [...document.querySelectorAll('a[href*="/account/orders/"]')];
                 const ids = links
@@ -267,18 +275,17 @@ jobs:
                 return [...new Set(ids)].slice(0, 20);
               });
 
-              console.log(`\n📋 ${orderIds.length} sipariş bulundu:`, orderIds);
+              console.log(`\n📋 ${orderIds.length} sipariş:`, orderIds);
 
               let processed = 0, skipped = 0, errors = 0;
 
-              /* ── 3. HER SİPARİŞİ İŞLE ── */
+              /* ── 3. HER SİPARİŞ ── */
               for (const orderId of orderIds) {
                 console.log(`\n${'─'.repeat(40)}`);
                 console.log(`🔍 Sipariş: #${orderId}`);
                 try {
-                  const alreadyDone = await isAlreadyProcessed(orderId);
-                  if (alreadyDone) {
-                    console.log(`⏭️  #${orderId} zaten işlendi, atlanıyor`);
+                  if (await isAlreadyProcessed(orderId)) {
+                    console.log(`⏭️  Zaten işlendi`);
                     skipped++;
                     continue;
                   }
@@ -287,9 +294,8 @@ jobs:
                     waitUntil: 'domcontentloaded',
                     timeout: 30000,
                   });
-
-                  await waitForCloudflare(page, `SİPARİŞ #${orderId}`);
-                  await page.waitForTimeout(2000);
+                  await waitForCloudflare(page, `#${orderId}`);
+                  await page.waitForTimeout(1500);
 
                   const order = await page.evaluate((oid) => {
                     const text = document.body.innerText || '';
@@ -310,9 +316,10 @@ jobs:
                     const creditMatch = text.match(/(\d+)\s*[Kk]redi/);
                     const credits     = creditMatch ? parseInt(creditMatch[1]) : 0;
 
-                    const bodyPreview = text.slice(0, 500).replace(/\s+/g, ' ');
-
-                    return { orderId: oid, email, note, amount, credits, isPaid, bodyPreview };
+                    return {
+                      orderId: oid, email, note, amount, credits, isPaid,
+                      bodyPreview: text.slice(0, 500).replace(/\s+/g, ' ')
+                    };
                   }, orderId);
 
                   console.log(`   isPaid  : ${order.isPaid}`);
@@ -323,42 +330,39 @@ jobs:
                   console.log(`   body    : ${order.bodyPreview}`);
 
                   if (!order.isPaid) {
-                    console.log(`⏸️  #${orderId} ödenmemiş, atlandı`);
+                    console.log(`⏸️  Ödenmemiş — atlandı`);
                     skipped++;
                     continue;
                   }
 
-                  const customerEmail = order.note.includes('@')
-                    ? order.note.trim()
-                    : order.email;
-
+                  const customerEmail = order.note.includes('@') ? order.note.trim() : order.email;
                   if (!customerEmail) {
-                    console.warn(`⚠️  #${orderId}: email bulunamadı — atlandı`);
+                    console.warn(`⚠️  Email bulunamadı — atlandı`);
                     errors++;
                     continue;
                   }
 
                   const credits = resolveCredits(order.amount, order.credits);
                   if (!credits) {
-                    console.warn(`⚠️  #${orderId}: kredi miktarı 0 (tutar: ${order.amount} TL) — atlandı`);
+                    console.warn(`⚠️  Kredi miktarı 0 (tutar: ${order.amount} TL) — atlandı`);
                     errors++;
                     continue;
                   }
 
-                  console.log(`💳 ${customerEmail} → ${credits} kredi yükleniyor...`);
+                  console.log(`💳 ${customerEmail} → ${credits} kredi`);
                   const result = await addCredits(customerEmail, credits, orderId);
                   console.log(`   Supabase [${result.status}]: ${result.body}`);
 
                   if (result.status >= 200 && result.status < 300) {
-                    console.log(`✅ #${orderId} başarıyla işlendi`);
+                    console.log(`✅ Başarılı`);
                     processed++;
                   } else {
-                    console.error(`❌ #${orderId} Supabase hatası [${result.status}]: ${result.body}`);
+                    console.error(`❌ Supabase hatası [${result.status}]: ${result.body}`);
                     errors++;
                   }
+
                 } catch (orderErr) {
-                  console.error(`❌ #${orderId} beklenmeyen hata: ${orderErr.message}`);
-                  console.error(`   Stack: ${orderErr.stack}`);
+                  console.error(`❌ #${orderId} hata: ${orderErr.message}`);
                   errors++;
                 }
               }
