@@ -228,7 +228,7 @@ Future<void> main() async {
 
   // ═══ 2) Gelecek maçlar: bulletinType=2 (zamanlanmış/iddaa) ══════
   print('\n── Gelecek maçlar (bulletinType=2) ──');
-  List<Map<String, dynamic>> futureEvents = await _fetchGamelist(tabType: 9999, bulletinType: 2);
+  List<Map<String, dynamic>> futureEvents = await _fetchGamelist(tabType: 1, bulletinType: 2);
 
   // Fallback: bulletinType=2 boşsa bulletinType=1'den gelecek günleri al
   if (futureEvents.isEmpty) {
