@@ -1,13 +1,13 @@
-name: Bilyoner Bağlantı Testi
+name: Fikstür Senkronizasyonu
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '30 21 * * *'       # Her gün 00:30 TR (UTC+3 = UTC 21:00)
 
 jobs:
-  test:
-    name: Bilyoner API Test
+  sync:
+    name: Bilyoner → Supabase
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -23,5 +23,8 @@ jobs:
       - name: Bağımlılıklar
         run: flutter pub get
 
-      - name: Bilyoner bağlantı testi
-        run: dart run test_bilyoner.dart
+      - name: Fikstür senkronizasyonu
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: dart run sync_fixtures.dart
