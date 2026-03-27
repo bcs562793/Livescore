@@ -1,0 +1,27 @@
+name: Bilyoner Bağlantı Testi
+
+on:
+  workflow_dispatch:       # Elle çalıştır (Actions sekmesinden "Run workflow" butonu)
+  schedule:
+    - cron: '0 */6 * * *'  # 6 saatte bir otomatik — istersan kapat
+
+jobs:
+  test:
+    name: Bilyoner API Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dart kurulumu
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Bağımlılıklar
+        run: dart pub get
+
+      - name: Bilyoner bağlantı testi
+        run: dart run test_bilyoner.dart
