@@ -52,7 +52,7 @@ Future<List<Map<String, dynamic>>> fetchFixtures() async {
       final events = (body['events'] as Map<String, dynamic>? ?? {})
           .values
           .whereType<Map<String, dynamic>>()
-          .where((e) => (e['st'] as int? ?? 0) == 1) // sadece futbol
+          .where((e) => (e['st'] as int? ?? 0) == 1)
           .toList();
 
       print('✅ ${events.length} futbol maçı alındı');
@@ -74,7 +74,6 @@ Future<void> main() async {
   }
 
   final sb = SupabaseClient(sbUrl, sbKey);
-
   print('📅 Fikstür senkronizasyonu — ${DateTime.now().toIso8601String()}');
 
   final events = await fetchFixtures();
@@ -83,11 +82,8 @@ Future<void> main() async {
     exit(1);
   }
 
-  // Bugün TR saati (UTC+3)
-  final trNow   = DateTime.now().toUtc().add(const Duration(hours: 3));
+  final trNow    = DateTime.now().toUtc().add(const Duration(hours: 3));
   final todayStr = '${trNow.year}-${trNow.month.toString().padLeft(2,'0')}-${trNow.day.toString().padLeft(2,'0')}';
-
-  // Bugün + 4 gün sonrasına kadar olan maçları filtrele
   final cutoffDate = trNow.add(const Duration(days: 5));
   final cutoffStr  = '${cutoffDate.year}-${cutoffDate.month.toString().padLeft(2,'0')}-${cutoffDate.day.toString().padLeft(2,'0')}';
 
@@ -96,67 +92,70 @@ Future<void> main() async {
     return esd.compareTo(todayStr) >= 0 && esd.compareTo(cutoffStr) < 0;
   }).toList();
 
-  print('📋 $todayStr → ${cutoffStr}: ${filtered.length} maç');
+  print('📋 $todayStr → $cutoffStr: ${filtered.length} maç');
 
   int upserted = 0;
   int failed   = 0;
 
   for (final ev in filtered) {
-    final id    = (ev['id'] as num).toInt();
-    final htpi  = (ev['htpi'] as num?)?.toInt();
-    final atpi  = (ev['atpi'] as num?)?.toInt();
-    final compId= (ev['competitionId'] as num?)?.toInt() ?? 0;
-    final brdId = (ev['brdId'] as num?)?.toInt();
-    final esd   = ev['esd'] as String? ?? '';
+    final id     = (ev['id'] as num).toInt();
+    final htpi   = (ev['htpi'] as num?)?.toInt();
+    final atpi   = (ev['atpi'] as num?)?.toInt();
+    final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
+    final brdId  = (ev['brdId'] as num?)?.toInt();
+    final esd    = ev['esd'] as String? ?? '';
     final dateStr = esd.length >= 10 ? esd.substring(0, 10) : todayStr;
     final isToday = dateStr == todayStr;
+    final now     = DateTime.now().toIso8601String();
 
-    final row = {
-      'fixture_id':   id,
-      'date':         dateStr,
-      'home_team':    ev['htn'] as String? ?? '',
-      'away_team':    ev['atn'] as String? ?? '',
-      'home_team_id': htpi,
-      'away_team_id': atpi,
-      'home_logo':    htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : '',
-      'away_logo':    atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : '',
-      'league_id':    compId,
-      'league_name':  ev['lgn'] as String? ?? '',
-      'betradar_id':  brdId,
-      'score_source': 'bilyoner',
-      'raw_data':     jsonEncode({
-        'fixture': {
-          'id':        id,
-          'timestamp': ((ev['esdl'] as num?)?.toInt() ?? 0) ~/ 1000,
-          'status': {'short': 'NS', 'elapsed': null},
-        },
-        'teams': {
-          'home': {'id': htpi, 'name': ev['htn'] ?? '', 'logo': htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : ''},
-          'away': {'id': atpi, 'name': ev['atn'] ?? '', 'logo': atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : ''},
-        },
-        'league': {'id': compId, 'name': ev['lgn'] ?? ''},
-        'goals': {'home': 0, 'away': 0},
-      }),
-      'updated_at': DateTime.now().toIso8601String(),
-    };
+    final homeLogo = htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : '';
+    final awayLogo = atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : '';
+    final rawData  = jsonEncode({
+      'fixture': {
+        'id':        id,
+        'timestamp': ((ev['esdl'] as num?)?.toInt() ?? 0) ~/ 1000,
+        'status':    {'short': 'NS', 'elapsed': null},
+      },
+      'teams': {
+        'home': {'id': htpi, 'name': ev['htn'] ?? '', 'logo': homeLogo},
+        'away': {'id': atpi, 'name': ev['atn'] ?? '', 'logo': awayLogo},
+      },
+      'league': {'id': compId, 'name': ev['lgn'] ?? ''},
+      'goals':   {'home': 0, 'away': 0},
+    });
 
     try {
       if (isToday) {
-        // Bugünkü maçlar → live_matches (sadece NS olanları, canlı skorları ezip)
+        // live_matches — date kolonu YOK, gönderme
         await sb.from('live_matches').upsert({
-          ...row,
+          'fixture_id':   id,
+          'home_team':    ev['htn'] as String? ?? '',
+          'away_team':    ev['atn'] as String? ?? '',
+          'home_team_id': htpi,
+          'away_team_id': atpi,
+          'home_logo':    homeLogo,
+          'away_logo':    awayLogo,
           'home_score':   0,
           'away_score':   0,
           'status_short': 'NS',
           'elapsed_time': null,
+          'league_id':    compId,
+          'league_name':  ev['lgn'] as String? ?? '',
           'league_logo':  '',
+          'betradar_id':  brdId,
+          'score_source': 'bilyoner',
+          'raw_data':     rawData,
+          'updated_at':   now,
         }, onConflict: 'fixture_id');
       } else {
-        // Gelecek maçlar → future_matches
-        await sb.from('future_matches').upsert(
-          {'fixture_id': id, 'date': dateStr, 'league_id': compId, 'data': jsonDecode(row['raw_data'] as String), 'updated_at': row['updated_at']},
-          onConflict: 'fixture_id',
-        );
+        // future_matches — date kolonu VAR
+        await sb.from('future_matches').upsert({
+          'fixture_id': id,
+          'date':       dateStr,
+          'league_id':  compId,
+          'data':       jsonDecode(rawData),
+          'updated_at': now,
+        }, onConflict: 'fixture_id');
       }
       upserted++;
     } catch (e) {
