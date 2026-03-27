@@ -15,13 +15,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Dart kurulumu
-        uses: dart-lang/setup-dart@v1
+      - name: Flutter kurulumu
+        uses: subosito/flutter-action@v2
         with:
-          sdk: stable
+          flutter-version: 'stable'
+          channel: 'stable'
 
       - name: Bağımlılıklar
-        run: dart pub get
+        run: flutter pub get
 
       - name: Bilyoner bağlantı testi
         run: dart run test_bilyoner.dart
