@@ -224,26 +224,47 @@ Future<void> main() async {
     final brdId  = (ev['brdId'] as num?)?.toInt();
 
     try {
-      await sb.from('live_matches').upsert({
-        'fixture_id':   id,
-        'home_team':    ev['htn'] as String? ?? '',
-        'away_team':    ev['atn'] as String? ?? '',
-        'home_team_id': htpi,
-        'away_team_id': atpi,
-        'home_logo':    htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : '',
-        'away_logo':    atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : '',
-        'home_score':   0,
-        'away_score':   0,
-        'status_short': 'NS',
-        'elapsed_time': null,
-        'league_id':    compId,
-        'league_name':  ev['lgn'] as String? ?? '',
-        'league_logo':  '',
-        'betradar_id':  brdId,
-        'score_source': 'bilyoner',
-        'raw_data':     jsonEncode(_buildRawData(ev)),
-        'updated_at':   DateTime.now().toIso8601String(),
+      // Canlı maçların üzerine yazma
+      final existing = await sb
+          .from('live_matches')
+          .select('status_short')
+          .eq('fixture_id', id)
+          .maybeSingle();
+      final existingStatus = existing?['status_short'] as String? ?? '';
+      final isLive = ['1H','2H','HT','ET','BT','P','LIVE'].contains(existingStatus);
+
+      if (!isLive) {
+        await sb.from('live_matches').upsert({
+          'fixture_id':   id,
+          'home_team':    ev['htn'] as String? ?? '',
+          'away_team':    ev['atn'] as String? ?? '',
+          'home_team_id': htpi,
+          'away_team_id': atpi,
+          'home_logo':    htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : '',
+          'away_logo':    atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : '',
+          'home_score':   0,
+          'away_score':   0,
+          'status_short': 'NS',
+          'elapsed_time': null,
+          'league_id':    compId,
+          'league_name':  ev['lgn'] as String? ?? '',
+          'league_logo':  '',
+          'betradar_id':  brdId,
+          'score_source': 'bilyoner',
+          'raw_data':     jsonEncode(_buildRawData(ev)),
+          'updated_at':   DateTime.now().toIso8601String(),
+        }, onConflict: 'fixture_id');
+      }
+
+      // future_matches her zaman yaz
+      await sb.from('future_matches').upsert({
+        'fixture_id': id,
+        'date':       todayStr,
+        'league_id':  compId,
+        'data':       _buildRawData(ev),
+        'updated_at': DateTime.now().toIso8601String(),
       }, onConflict: 'fixture_id');
+
       todayOk++;
     } catch (e) {
       print('  ⚠️  live ($id): $e');
@@ -251,6 +272,8 @@ Future<void> main() async {
     }
   }
   print('✅ Bugün: $todayOk yazıldı${todayErr > 0 ? ", $todayErr hatalı" : ""}');
+
+  
 
   // ═══ 2) Gelecek maçlar: tabType=1, bulletinType=2 ═══════════════
   // HAR kanıtı: /iddaa sayfası → tabType=1&bulletinType=2 → 576 event
