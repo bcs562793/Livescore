@@ -210,7 +210,7 @@ Future<void> main() async {
 
   // ═══ 1) Bugünkü maçlar: tabType=9999, bulletinType=1 ════════════
   print('\n── Bugünkü maçlar (tabType=9999&bulletinType=1) ──');
-  final todayEvents = await _fetchGamelist(tabType: 9999, bulletinType: 1);
+  final todayEvents = await _fetchGamelist(tabType: 1, bulletinType: 1);
 
   int todayOk = 0, todayErr = 0;
   for (final ev in todayEvents) {
