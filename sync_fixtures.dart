@@ -208,14 +208,35 @@ Future<void> main() async {
   print('\n── Eski kayıt temizliği ──');
   await _cleanStaleRecords(sbUrl, sbKey);
 
-  // ═══ 1) Bugünkü maçlar: tabType=9999, bulletinType=1 ════════════
-  print('\n── Bugünkü maçlar (tabType=9999&bulletinType=1) ──');
-  final todayEvents = await _fetchGamelist(tabType: 1, bulletinType: 1);
+  // ═══ 1) Bütün Verileri Çek ve Birleştir ═════════════════════════
+  print('\n── Canlı maçlar çekiliyor (bulletinType=1) ──');
+  final liveEvents = await _fetchGamelist(tabType: 1, bulletinType: 1);
 
+  print('\n── Maç önü bülteni çekiliyor (bulletinType=2) ──');
+  final prematchEvents = await _fetchGamelist(tabType: 1, bulletinType: 2);
+
+  // Tüm etkinlikleri tek bir Map'te birleştiriyoruz.
+  // Aynı maç hem bültende hem canlıda varsa, canlı olan veri daha güncel olduğu için ezecek.
+  final Map<int, Map<String, dynamic>> allEventsMap = {};
+  for (final ev in prematchEvents) {
+    allEventsMap[(ev['id'] as num).toInt()] = ev;
+  }
+  for (final ev in liveEvents) {
+    allEventsMap[(ev['id'] as num).toInt()] = ev;
+  }
+  
+  final allEvents = allEventsMap.values.toList();
+
+  // ═══ 2) Bugünkü maçlar (Tarihi bugün olanlar) ═══════════════════
+  print('\n── Bugünkü maçlar işleniyor ($todayStr) ──');
   int todayOk = 0, todayErr = 0;
-  for (final ev in todayEvents) {
+
+  for (final ev in allEvents) {
     final esd = ev['esd'] as String? ?? '';
-    if (!esd.startsWith(todayStr)) continue;
+    final date = esd.length >= 10 ? esd.substring(0, 10) : '';
+
+    // Sadece bugünün tarihine uyanları filtrele
+    if (date != todayStr) continue;
 
     final id     = (ev['id']   as num).toInt();
     final htpi   = (ev['htpi'] as num?)?.toInt();
@@ -224,7 +245,6 @@ Future<void> main() async {
     final brdId  = (ev['brdId'] as num?)?.toInt();
 
     try {
-      // Canlı maçların üzerine yazma
       final existing = await sb
           .from('live_matches')
           .select('status_short')
@@ -256,7 +276,6 @@ Future<void> main() async {
         }, onConflict: 'fixture_id');
       }
 
-      // future_matches her zaman yaz
       await sb.from('future_matches').upsert({
         'fixture_id': id,
         'date':       todayStr,
@@ -273,28 +292,23 @@ Future<void> main() async {
   }
   print('✅ Bugün: $todayOk yazıldı${todayErr > 0 ? ", $todayErr hatalı" : ""}');
 
-  
-
-  // ═══ 2) Gelecek maçlar: tabType=1, bulletinType=2 ═══════════════
-  // HAR kanıtı: /iddaa sayfası → tabType=1&bulletinType=2 → 576 event
-  // tabType=9999&bulletinType=2 → her zaman BOŞTUR
-  print('\n── Gelecek maçlar (tabType=1&bulletinType=2) ──');
-  List<Map<String, dynamic>> futureEvents =
-      await _fetchGamelist(tabType: 1, bulletinType: 2);
-
-  if (futureEvents.isEmpty) {
-    print('⚠️  Fallback: bugünkü liste kullanılıyor');
-    futureEvents = todayEvents;
-  }
-
+  // ═══ 3) Gelecek maçlar (Tarihi bugünden büyük olanlar) ═══════════
+  print('\n── Gelecek maçlar işleniyor ──');
   final byDate = <String, List<Map<String, dynamic>>>{};
-  for (final ev in futureEvents) {
+
+  for (final ev in allEvents) {
     final esd  = ev['esd'] as String? ?? '';
     final date = esd.length >= 10 ? esd.substring(0, 10) : '';
+
+    // Bugün ve geçmiş olanları atla (Bugün yukarıda işlendi)
     if (date.isEmpty || date.compareTo(todayStr) <= 0) continue;
+    
     final cutoff = trNow.add(const Duration(days: 5));
     final cutoffStr = '${cutoff.year}-${pad(cutoff.month)}-${pad(cutoff.day)}';
+    
+    // 5 günden sonrasını alma
     if (date.compareTo(cutoffStr) >= 0) continue;
+    
     (byDate[date] ??= []).add(ev);
   }
 
@@ -335,3 +349,4 @@ Future<void> main() async {
   await sb.dispose();
   exit(totalErr > 0 ? 1 : 0);
 }
+
