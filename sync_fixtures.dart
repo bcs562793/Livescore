@@ -33,6 +33,44 @@ Map<String, String> _headers({bool isLive = true}) => {
   'x-device-id':              _bilyonerDeviceId,
 };
 
+// ── Logo Mapping ─────────────────────────────────────────────────────────────
+
+/// team_logo_mapping tablosundan {live_team_id → api_logo} haritası yükler.
+/// low_confidence=true olanları atlar — bunlar için mackolik logo fallback kullanılır.
+Future<Map<int, String>> _loadLogoMapping(SupabaseClient sb) async {
+  try {
+    final rows = await sb
+        .from('team_logo_mapping')
+        .select('live_team_id, api_logo')
+        .eq('low_confidence', false)
+        .not('api_logo', 'is', null)
+        .neq('api_logo', '');
+
+    final map = <int, String>{};
+    for (final row in rows) {
+      final id   = row['live_team_id'] as int?;
+      final logo = row['api_logo']     as String?;
+      if (id != null && logo != null && logo.isNotEmpty) {
+        map[id] = logo;
+      }
+    }
+    print('🖼  Logo mapping yüklendi: ${map.length} takım');
+    return map;
+  } catch (e) {
+    print('⚠️  Logo mapping yüklenemedi (mackolik fallback kullanılacak): $e');
+    return {};
+  }
+}
+
+/// team_id için en iyi logo URL'ini döner.
+/// Mapping'de varsa API logosunu, yoksa mackolik URL'ini döner.
+String _resolveLogo(int? teamId, Map<int, String> logoMap) {
+  if (teamId == null) return '';
+  return logoMap[teamId] ?? 'https://im.mackolik.com/img/logo/buyuk/$teamId.gif';
+}
+
+// ── Tarih yardımcıları ───────────────────────────────────────────────────────
+
 String _toIsoTR(int esdMs) {
   if (esdMs == 0) return '';
   final utc = DateTime.fromMillisecondsSinceEpoch(esdMs, isUtc: true);
@@ -41,6 +79,8 @@ String _toIsoTR(int esdMs) {
   return '${tr.year}-${pad(tr.month)}-${pad(tr.day)}'
       'T${pad(tr.hour)}:${pad(tr.minute)}:00+03:00';
 }
+
+// ── Bilyoner API ─────────────────────────────────────────────────────────────
 
 Future<List<Map<String, dynamic>>> _fetchGamelist({
   required int tabType,
@@ -94,7 +134,12 @@ Future<List<Map<String, dynamic>>> _fetchGamelist({
   return [];
 }
 
-Map<String, dynamic> _buildRawData(Map<String, dynamic> ev) {
+// ── raw_data builder ─────────────────────────────────────────────────────────
+
+Map<String, dynamic> _buildRawData(
+  Map<String, dynamic> ev,
+  Map<int, String> logoMap,
+) {
   final id    = (ev['id']   as num).toInt();
   final htpi  = (ev['htpi'] as num?)?.toInt();
   final atpi  = (ev['atpi'] as num?)?.toInt();
@@ -104,7 +149,7 @@ Map<String, dynamic> _buildRawData(Map<String, dynamic> ev) {
     'fixture': {
       'id':        id,
       'timestamp': esdMs ~/ 1000,
-      'date':      _toIsoTR(esdMs),   // frontend saat gösterimi için
+      'date':      _toIsoTR(esdMs),
       'timezone':  'Europe/Istanbul',
       'referee':   null,
       'periods':   {'first': null, 'second': null},
@@ -115,13 +160,13 @@ Map<String, dynamic> _buildRawData(Map<String, dynamic> ev) {
       'home': {
         'id':     htpi,
         'name':   ev['htn'] ?? '',
-        'logo':   htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : '',
+        'logo':   _resolveLogo(htpi, logoMap),   // ← akıllı logo
         'winner': null,
       },
       'away': {
         'id':     atpi,
         'name':   ev['atn'] ?? '',
-        'logo':   atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : '',
+        'logo':   _resolveLogo(atpi, logoMap),   // ← akıllı logo
         'winner': null,
       },
     },
@@ -145,15 +190,8 @@ Map<String, dynamic> _buildRawData(Map<String, dynamic> ev) {
   };
 }
 
-/// Eski apifootball/nesine-dışı kayıtları temizle.
-/// 
-/// NEDEN GEREKLİ:
-/// Bilyoner fixture_id ≠ apifootball fixture_id (örn: Cordoba bilyoner=2838521, apifootball=1392111)
-/// Temizlenmezse DB'de iki ayrı satır oluşur, frontend yanlış ID'yi okur → maç NS kalır.
-/// 
-/// KORUNAN kayıtlar:
-/// - score_source='nesine'  → Nesine bahisli maçlar, skor oradan geliyor
-/// - status_short != 'NS'  → Canlı veya bitmiş maçlara dokunma
+// ── Temizlik ─────────────────────────────────────────────────────────────────
+
 Future<void> _cleanStaleRecords(String sbUrl, String sbKey) async {
   final h = {
     'apikey':        sbKey,
@@ -161,8 +199,6 @@ Future<void> _cleanStaleRecords(String sbUrl, String sbKey) async {
     'Prefer':        'return=minimal',
   };
 
-  // live_matches: sadece NS + non-nesine olanları sil
-  // (canlı/biten maçlar korunuyor)
   try {
     final r = await http.delete(
       Uri.parse('$sbUrl/rest/v1/live_matches'
@@ -175,7 +211,6 @@ Future<void> _cleanStaleRecords(String sbUrl, String sbKey) async {
     print('⚠️  live_matches temizleme: $e');
   }
 
-  // future_matches: tümünü sil, güncel Bilyoner verisiyle yaz
   try {
     final r = await http.delete(
       Uri.parse('$sbUrl/rest/v1/future_matches?fixture_id=gte.0'),
@@ -186,6 +221,8 @@ Future<void> _cleanStaleRecords(String sbUrl, String sbKey) async {
     print('⚠️  future_matches temizleme: $e');
   }
 }
+
+// ── main ─────────────────────────────────────────────────────────────────────
 
 Future<void> main() async {
   final sbUrl = Platform.environment['SUPABASE_URL'] ?? '';
@@ -204,19 +241,22 @@ Future<void> main() async {
   print('📅 Fikstür senkronizasyonu — ${DateTime.now().toIso8601String()}');
   print('🗓  Bugün (TR): $todayStr');
 
-  // ═══ 0) Stale kayıt temizliği ═══════════════════════════════════
+  // ═══ 0) Logo mapping'i yükle ════════════════════════════════════
+  // Tek HTTP isteği — tüm script boyunca bu Map kullanılır.
+  print('\n── Logo mapping yükleniyor ──');
+  final logoMap = await _loadLogoMapping(sb);
+
+  // ═══ 1) Stale kayıt temizliği ═══════════════════════════════════
   print('\n── Eski kayıt temizliği ──');
   await _cleanStaleRecords(sbUrl, sbKey);
 
-  // ═══ 1) Bütün Verileri Çek ve Birleştir ═════════════════════════
+  // ═══ 2) Bilyoner verilerini çek ══════════════════════════════════
   print('\n── Canlı maçlar çekiliyor (bulletinType=1) ──');
   final liveEvents = await _fetchGamelist(tabType: 1, bulletinType: 1);
 
   print('\n── Maç önü bülteni çekiliyor (bulletinType=2) ──');
   final prematchEvents = await _fetchGamelist(tabType: 1, bulletinType: 2);
 
-  // Tüm etkinlikleri tek bir Map'te birleştiriyoruz.
-  // Aynı maç hem bültende hem canlıda varsa, canlı olan veri daha güncel olduğu için ezecek.
   final Map<int, Map<String, dynamic>> allEventsMap = {};
   for (final ev in prematchEvents) {
     allEventsMap[(ev['id'] as num).toInt()] = ev;
@@ -224,18 +264,15 @@ Future<void> main() async {
   for (final ev in liveEvents) {
     allEventsMap[(ev['id'] as num).toInt()] = ev;
   }
-  
   final allEvents = allEventsMap.values.toList();
 
-  // ═══ 2) Bugünkü maçlar (Tarihi bugün olanlar) ═══════════════════
+  // ═══ 3) Bugünkü maçlar ══════════════════════════════════════════
   print('\n── Bugünkü maçlar işleniyor ($todayStr) ──');
   int todayOk = 0, todayErr = 0;
 
   for (final ev in allEvents) {
-    final esd = ev['esd'] as String? ?? '';
+    final esd  = ev['esd'] as String? ?? '';
     final date = esd.length >= 10 ? esd.substring(0, 10) : '';
-
-    // Sadece bugünün tarihine uyanları filtrele
     if (date != todayStr) continue;
 
     final id     = (ev['id']   as num).toInt();
@@ -243,6 +280,10 @@ Future<void> main() async {
     final atpi   = (ev['atpi'] as num?)?.toInt();
     final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
     final brdId  = (ev['brdId'] as num?)?.toInt();
+
+    // Takım ID'lerine göre logoları çöz
+    final homeLogo = _resolveLogo(htpi, logoMap);
+    final awayLogo = _resolveLogo(atpi, logoMap);
 
     try {
       final existing = await sb
@@ -260,8 +301,8 @@ Future<void> main() async {
           'away_team':    ev['atn'] as String? ?? '',
           'home_team_id': htpi,
           'away_team_id': atpi,
-          'home_logo':    htpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$htpi.gif' : '',
-          'away_logo':    atpi != null ? 'https://im.mackolik.com/img/logo/buyuk/$atpi.gif' : '',
+          'home_logo':    homeLogo,
+          'away_logo':    awayLogo,
           'home_score':   0,
           'away_score':   0,
           'status_short': 'NS',
@@ -271,7 +312,7 @@ Future<void> main() async {
           'league_logo':  '',
           'betradar_id':  brdId,
           'score_source': 'bilyoner',
-          'raw_data':     jsonEncode(_buildRawData(ev)),
+          'raw_data':     jsonEncode(_buildRawData(ev, logoMap)),
           'updated_at':   DateTime.now().toIso8601String(),
         }, onConflict: 'fixture_id');
       }
@@ -280,7 +321,7 @@ Future<void> main() async {
         'fixture_id': id,
         'date':       todayStr,
         'league_id':  compId,
-        'data':       _buildRawData(ev),
+        'data':       _buildRawData(ev, logoMap),
         'updated_at': DateTime.now().toIso8601String(),
       }, onConflict: 'fixture_id');
 
@@ -292,23 +333,19 @@ Future<void> main() async {
   }
   print('✅ Bugün: $todayOk yazıldı${todayErr > 0 ? ", $todayErr hatalı" : ""}');
 
-  // ═══ 3) Gelecek maçlar (Tarihi bugünden büyük olanlar) ═══════════
+  // ═══ 4) Gelecek maçlar ═══════════════════════════════════════════
   print('\n── Gelecek maçlar işleniyor ──');
   final byDate = <String, List<Map<String, dynamic>>>{};
 
   for (final ev in allEvents) {
     final esd  = ev['esd'] as String? ?? '';
     final date = esd.length >= 10 ? esd.substring(0, 10) : '';
-
-    // Bugün ve geçmiş olanları atla (Bugün yukarıda işlendi)
     if (date.isEmpty || date.compareTo(todayStr) <= 0) continue;
-    
-    final cutoff = trNow.add(const Duration(days: 5));
+
+    final cutoff    = trNow.add(const Duration(days: 5));
     final cutoffStr = '${cutoff.year}-${pad(cutoff.month)}-${pad(cutoff.day)}';
-    
-    // 5 günden sonrasını alma
     if (date.compareTo(cutoffStr) >= 0) continue;
-    
+
     (byDate[date] ??= []).add(ev);
   }
 
@@ -327,7 +364,7 @@ Future<void> main() async {
           'fixture_id': id,
           'date':       dateStr,
           'league_id':  compId,
-          'data':       _buildRawData(ev),
+          'data':       _buildRawData(ev, logoMap),   // ← akıllı logo
           'updated_at': DateTime.now().toIso8601String(),
         }, onConflict: 'fixture_id');
         futureOk++;
@@ -341,12 +378,12 @@ Future<void> main() async {
 
   final totalErr = todayErr + futureErr;
   print('\n═══════════════════════════════');
-  print('  ✅ Bugün    : $todayOk maç');
-  print('  ✅ Gelecek  : $futureOk maç');
-  if (totalErr > 0) print('  ❌ Hatalı   : $totalErr');
+  print('  🖼  Logo mapping : ${logoMap.length} takım');
+  print('  ✅ Bugün         : $todayOk maç');
+  print('  ✅ Gelecek       : $futureOk maç');
+  if (totalErr > 0) print('  ❌ Hatalı        : $totalErr');
   print('═══════════════════════════════');
 
   await sb.dispose();
   exit(totalErr > 0 ? 1 : 0);
 }
-
