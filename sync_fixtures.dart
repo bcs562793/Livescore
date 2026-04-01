@@ -194,7 +194,8 @@ class _LogoIndex {
       if (found) matched++;
     }
 
-    final tokenRatio = matched / (ta.length > tb.length ? ta.length : tb.length);
+    // Sorgunun TÜM tokenleri eşleştiyse yüksek puan — "Hannover" → "Hannover 96" gibi
+    final tokenRatio = ta.isEmpty ? 0.0 : matched / ta.length;
 
     // b'deki önemli tokenler a'da geçiyor mu?
     int bInA = 0;
