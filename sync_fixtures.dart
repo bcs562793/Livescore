@@ -256,14 +256,14 @@ Future<int> _batchUpsert(
 /// RPC'ler yazma bittikten sonra doğrudan JOIN yaparak her iki tabloyu da düzeltir.
 Future<void> _syncLogos(SupabaseClient sb) async {
   try {
-    await sb.rpc('sync_live_match_logos', {});
+    await sb.rpc('sync_live_match_logos');
     print('🖼  sync_live_match_logos      → live_matches logoları güncellendi');
   } catch (e) {
     print('⚠️  sync_live_match_logos RPC hatası: $e');
   }
 
   try {
-    await sb.rpc('sync_future_match_logos', {});
+    await sb.rpc('sync_future_match_logos');
     print('🖼  sync_future_match_logos    → future_matches.data logoları güncellendi');
   } catch (e) {
     print('⚠️  sync_future_match_logos RPC hatası: $e');
@@ -507,7 +507,6 @@ const Map<String, String> _lgCountryMap = {
   'israil':     'Israel',
   'kazakistan': 'Kazakhstan',
   'ozbekistan': 'Uzbekistan',
-  'azerbaycan': 'Azerbaijan',
 
   // İki kelime (birleşik anahtar: "gueney_afrika" vb.)
   'gueney_afrika':  'South Africa',
