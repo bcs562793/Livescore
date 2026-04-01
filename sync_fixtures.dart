@@ -112,22 +112,23 @@ class _LogoIndex {
 
   /// teamName: Bilyoner'den gelen ham isim
   /// leagueCountry: extractCountryFromLeague() ile çıkarılmış İngilizce ülke
-  String resolve(String teamName, String leagueCountry) {
-    if (teamName.isEmpty) return '';
+  String resolve(String teamName, String leagueCountry, int? teamId) {
+    if (teamName.isEmpty) return _mackolik(teamId);
     final q       = _norm(teamName);
     final country = leagueCountry.toLowerCase();
 
     // 1. Tam isim + ülke
-    final exact = _exact['$q|$country'];
+    final exact = _exact['\$q|\$country'];
     if (exact != null && exact.isNotEmpty) { matched++; return exact; }
 
-    // 2. Tam isim, ülke bilinmiyor
-    if (country.isEmpty) {
-      final noCountry = _exact['$q|'];
-      if (noCountry != null && noCountry.isNotEmpty) { matched++; return noCountry; }
+    // 2. Tam isim + ülkesiz fallback
+    final noCountry = _exact['\$q|'];
+    if (noCountry != null && noCountry.isNotEmpty) {
+      matched++;
+      return noCountry;
     }
 
-    // 3. Fuzzy — basit Levenshtein yerine token overlap kullan
+    // 3. Fuzzy
     String bestLogo    = '';
     double bestScore   = 0;
     String bestCountry = '';
@@ -141,31 +142,71 @@ class _LogoIndex {
       }
     }
 
-    if (bestScore >= 0.85) {
-      // Ülke farklıysa ceza
+    if (bestScore >= 0.62) {
+      // Ülke farklıysa büyük ceza
       if (country.isNotEmpty && bestCountry.isNotEmpty && country != bestCountry) {
-        bestScore -= 0.20;
+        bestScore -= 0.25;
       }
-      if (bestScore >= 0.82) { matched++; return bestLogo; }
+      if (bestScore >= 0.58 && bestLogo.isNotEmpty) {
+        matched++;
+        return bestLogo;
+      }
     }
 
+    // 4. Mackolik CDN fallback — en azından bir logo göster
     fallback++;
-    return '';
+    return _mackolik(teamId);
   }
 
-  /// Token overlap skoru (0.0 – 1.0)
+  /// Mackolik CDN URL'i — teamId Bilyoner htpi/atpi
+  String _mackolik(int? teamId) =>
+      teamId != null ? 'https://im.mackolik.com/img/logo/buyuk/\$teamId.gif' : '';
+
+  /// Gelişmiş token skoru:
+  ///   - Tam token eşleşmesi (Jaccard)
+  ///   - Prefix eşleşmesi: "f" → "fortuna", "b" → "borussia
+  ///   - Suffix eşleşmesi: "sittard" ∈ "fortuna sittard"
   double _tokenScore(String a, String b) {
     if (a == b) return 1.0;
-    final ta = a.split(' ').toSet();
-    final tb = b.split(' ').toSet();
+    final ta = a.split(' ');
+    final tb = b.split(' ');
     if (ta.isEmpty || tb.isEmpty) return 0.0;
-    final inter = ta.intersection(tb).length;
-    final union = ta.union(tb).length;
-    // Jaccard
-    final jac = inter / union;
-    // Prefix bonus: ilk 4 karakter aynıysa
-    final prefix = (a.length >= 4 && b.length >= 4 && a.substring(0,4) == b.substring(0,4)) ? 0.1 : 0.0;
-    return (jac + prefix).clamp(0.0, 1.0);
+
+    // Her a token'i için en iyi eşleşmeyi bul
+    int matched = 0;
+    for (final at in ta) {
+      bool found = false;
+      for (final bt in tb) {
+        if (at == bt) { found = true; break; }
+        // Prefix: kısa token uzun tokenin başı olabilir
+        // tek karakter bile prefix sayılır (F. Sittard → Fortuna Sittard)
+        if (bt.startsWith(at)) { found = true; break; }
+        if (at.startsWith(bt)) { found = true; break; }
+        // 3+ karakter prefix
+        if (at.length >= 3 && bt.length >= 3) {
+          final minLen = at.length < bt.length ? at.length : bt.length;
+          final prefLen = minLen < 4 ? minLen : 4;
+          if (at.substring(0, prefLen) == bt.substring(0, prefLen)) {
+            found = true; break;
+          }
+        }
+      }
+      if (found) matched++;
+    }
+
+    final tokenRatio = matched / (ta.length > tb.length ? ta.length : tb.length);
+
+    // b'deki önemli tokenler a'da geçiyor mu?
+    int bInA = 0;
+    for (final bt in tb) {
+      if (bt.length < 3) continue;
+      for (final at in ta) {
+        if (at == bt || at.contains(bt) || bt.contains(at)) { bInA++; break; }
+      }
+    }
+    final bRatio = tb.isEmpty ? 0.0 : bInA / tb.length;
+
+    return (tokenRatio * 0.7 + bRatio * 0.3).clamp(0.0, 1.0);
   }
 }
 
@@ -455,8 +496,8 @@ Future<void> main() async {
 
     // Ülkeyi bir kez çıkar, hem logo lookup hem league.country için kullan
     final country  = extractCountryFromLeague(lgn);
-    final homeLogo = logoIndex.resolve(htn, country);
-    final awayLogo = logoIndex.resolve(atn, country);
+    final homeLogo = logoIndex.resolve(htn, country, htpi);
+    final awayLogo = logoIndex.resolve(atn, country, atpi);
     final rawData  = _buildRawData(ev, homeLogo: homeLogo, awayLogo: awayLogo, country: country);
 
     if (date == todayStr) {
