@@ -33,10 +33,8 @@ Map<String, String> _headers({bool isLive = true}) => {
   'x-device-id':              _bilyonerDeviceId,
 };
 
-// ── Logo Mapping ─────────────────────────────────────────────────────────────
+// ── Logo Mapping ──────────────────────────────────────────────────────────────
 
-/// team_logo_mapping tablosundan {live_team_id → api_logo} haritası yükler.
-/// low_confidence=true olanları atlar — bunlar için mackolik logo fallback kullanılır.
 Future<Map<int, String>> _loadLogoMapping(SupabaseClient sb) async {
   try {
     final rows = await sb
@@ -62,8 +60,6 @@ Future<Map<int, String>> _loadLogoMapping(SupabaseClient sb) async {
   }
 }
 
-/// team_id için en iyi logo URL'ini döner.
-/// Mapping'de varsa API logosunu, yoksa mackolik URL'ini döner.
 String _resolveLogo(int? teamId, Map<int, String> logoMap) {
   if (teamId == null) return '';
   return logoMap[teamId] ?? 'https://im.mackolik.com/img/logo/buyuk/$teamId.gif';
@@ -136,10 +132,14 @@ Future<List<Map<String, dynamic>>> _fetchGamelist({
 
 // ── raw_data builder ─────────────────────────────────────────────────────────
 
+// DÜZELTİLDİ: Logo parametreleri dışarıdan alınıyor — _resolveLogo iki kez
+// çağrılmıyordu ama _buildRawData içinde de ev['esdl'] kullanılıyordu.
+// Artık çözümlenmiş logolar direkt parametre olarak geliyor.
 Map<String, dynamic> _buildRawData(
-  Map<String, dynamic> ev,
-  Map<int, String> logoMap,
-) {
+  Map<String, dynamic> ev, {
+  required String homeLogo,
+  required String awayLogo,
+}) {
   final id    = (ev['id']   as num).toInt();
   final htpi  = (ev['htpi'] as num?)?.toInt();
   final atpi  = (ev['atpi'] as num?)?.toInt();
@@ -160,13 +160,13 @@ Map<String, dynamic> _buildRawData(
       'home': {
         'id':     htpi,
         'name':   ev['htn'] ?? '',
-        'logo':   _resolveLogo(htpi, logoMap),   // ← akıllı logo
+        'logo':   homeLogo,
         'winner': null,
       },
       'away': {
         'id':     atpi,
         'name':   ev['atn'] ?? '',
-        'logo':   _resolveLogo(atpi, logoMap),   // ← akıllı logo
+        'logo':   awayLogo,
         'winner': null,
       },
     },
@@ -222,6 +222,33 @@ Future<void> _cleanStaleRecords(String sbUrl, String sbKey) async {
   }
 }
 
+// ── Batch upsert ─────────────────────────────────────────────────────────────
+
+// DÜZELTİLDİ: Eski kodda her kayıt ayrı HTTP isteği yapıyordu (N upsert).
+// Şimdi 200'lük batch'ler halinde tek istekte gönderiliyor.
+const _batchSize = 200;
+
+Future<int> _batchUpsert(
+  SupabaseClient sb,
+  String table,
+  List<Map<String, dynamic>> records,
+  String onConflict,
+) async {
+  int errors = 0;
+  for (int i = 0; i < records.length; i += _batchSize) {
+    final chunk = records.sublist(
+      i, (i + _batchSize).clamp(0, records.length),
+    );
+    try {
+      await sb.from(table).upsert(chunk, onConflict: onConflict);
+    } catch (e) {
+      print('  ⚠️  $table batch upsert hatası (${i}–${i + chunk.length}): $e');
+      errors += chunk.length;
+    }
+  }
+  return errors;
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 Future<void> main() async {
@@ -238,25 +265,30 @@ Future<void> main() async {
   final pad   = (int n) => n.toString().padLeft(2, '0');
   final todayStr = '${trNow.year}-${pad(trNow.month)}-${pad(trNow.day)}';
 
-  print('📅 Fikstür senkronizasyonu — ${DateTime.now().toIso8601String()}');
-  print('🗓  Bugün (TR): $todayStr');
+  // DÜZELTİLDİ: cutoff bir kez hesaplanıyor — eski kodda her event için
+  // döngü içinde hesaplanıyordu (gereksiz tekrar).
+  final cutoff    = trNow.add(const Duration(days: 5));
+  final cutoffStr = '${cutoff.year}-${pad(cutoff.month)}-${pad(cutoff.day)}';
 
-  // ═══ 0) Logo mapping'i yükle ════════════════════════════════════
-  // Tek HTTP isteği — tüm script boyunca bu Map kullanılır.
+  print('📅 Fikstür senkronizasyonu — ${DateTime.now().toIso8601String()}');
+  print('🗓  Bugün (TR): $todayStr  |  Kesim: $cutoffStr');
+
+  // ═══ 0) Logo mapping ════════════════════════════════════════════
   print('\n── Logo mapping yükleniyor ──');
   final logoMap = await _loadLogoMapping(sb);
 
-  // ═══ 1) Stale kayıt temizliği ═══════════════════════════════════
+  // ═══ 1) Temizlik ════════════════════════════════════════════════
   print('\n── Eski kayıt temizliği ──');
   await _cleanStaleRecords(sbUrl, sbKey);
 
-  // ═══ 2) Bilyoner verilerini çek ══════════════════════════════════
+  // ═══ 2) Bilyoner verilerini çek ════════════════════════════════
   print('\n── Canlı maçlar çekiliyor (bulletinType=1) ──');
   final liveEvents = await _fetchGamelist(tabType: 1, bulletinType: 1);
 
   print('\n── Maç önü bülteni çekiliyor (bulletinType=2) ──');
   final prematchEvents = await _fetchGamelist(tabType: 1, bulletinType: 2);
 
+  // Live olanlar prematch'in üzerine yazar (aynı id varsa)
   final Map<int, Map<String, dynamic>> allEventsMap = {};
   for (final ev in prematchEvents) {
     allEventsMap[(ev['id'] as num).toInt()] = ev;
@@ -266,14 +298,34 @@ Future<void> main() async {
   }
   final allEvents = allEventsMap.values.toList();
 
-  // ═══ 3) Bugünkü maçlar ══════════════════════════════════════════
+  // ═══ 3) Mevcut live_matches durumlarını tek sorguda çek ════════
+  // DÜZELTİLDİ: Eski kodda her maç için ayrı SELECT yapılıyordu (N+1 sorgu).
+  // Şimdi tek sorguda tüm NS olmayan fixture_id'ler alınıyor, lokalde filtre.
+  print('\n── Mevcut live durum sorgulanıyor ──');
+  final Set<int> liveFixtureIds = {};
+  try {
+    final liveRows = await sb
+        .from('live_matches')
+        .select('fixture_id, status_short')
+        .inFilter('status_short', ['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE']);
+    for (final row in liveRows) {
+      final fid = row['fixture_id'] as int?;
+      if (fid != null) liveFixtureIds.add(fid);
+    }
+    print('  ⚽ Aktif canlı maç: ${liveFixtureIds.length}');
+  } catch (e) {
+    print('  ⚠️  Canlı durum sorgulanamadı, tümü yazılacak: $e');
+  }
+
+  // ═══ 4) Bugünkü maçları hazırla ════════════════════════════════
   print('\n── Bugünkü maçlar işleniyor ($todayStr) ──');
-  int todayOk = 0, todayErr = 0;
+
+  final List<Map<String, dynamic>> liveUpserts   = [];
+  final List<Map<String, dynamic>> futureUpserts = [];
 
   for (final ev in allEvents) {
     final esd  = ev['esd'] as String? ?? '';
     final date = esd.length >= 10 ? esd.substring(0, 10) : '';
-    if (date != todayStr) continue;
 
     final id     = (ev['id']   as num).toInt();
     final htpi   = (ev['htpi'] as num?)?.toInt();
@@ -281,21 +333,15 @@ Future<void> main() async {
     final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
     final brdId  = (ev['brdId'] as num?)?.toInt();
 
-    // Takım ID'lerine göre logoları çöz
+    // Logo bir kez çözümleniyor, hem live hem future hem raw_data'da kullanılıyor
     final homeLogo = _resolveLogo(htpi, logoMap);
     final awayLogo = _resolveLogo(atpi, logoMap);
+    final rawData  = _buildRawData(ev, homeLogo: homeLogo, awayLogo: awayLogo);
 
-    try {
-      final existing = await sb
-          .from('live_matches')
-          .select('status_short')
-          .eq('fixture_id', id)
-          .maybeSingle();
-      final existingStatus = existing?['status_short'] as String? ?? '';
-      final isLive = ['1H','2H','HT','ET','BT','P','LIVE'].contains(existingStatus);
-
-      if (!isLive) {
-        await sb.from('live_matches').upsert({
+    if (date == todayStr) {
+      // Aktif canlı maçı NS olarak ezme
+      if (!liveFixtureIds.contains(id)) {
+        liveUpserts.add({
           'fixture_id':   id,
           'home_team':    ev['htn'] as String? ?? '',
           'away_team':    ev['atn'] as String? ?? '',
@@ -312,75 +358,49 @@ Future<void> main() async {
           'league_logo':  '',
           'betradar_id':  brdId,
           'score_source': 'bilyoner',
-          'raw_data':     jsonEncode(_buildRawData(ev, logoMap)),
+          // DÜZELTİLDİ: raw_data artık Map olarak geçiyor (JSONB sütunu için doğru).
+          // Eski kodda jsonEncode ile string'e çevriliyordu — live ve future arasında
+          // tip tutarsızlığı vardı (live: string, future: Map).
+          'raw_data':     rawData,
           'updated_at':   DateTime.now().toIso8601String(),
-        }, onConflict: 'fixture_id');
+        });
       }
 
-      await sb.from('future_matches').upsert({
+      futureUpserts.add({
         'fixture_id': id,
         'date':       todayStr,
         'league_id':  compId,
-        'data':       _buildRawData(ev, logoMap),
+        'data':       rawData,
         'updated_at': DateTime.now().toIso8601String(),
-      }, onConflict: 'fixture_id');
-
-      todayOk++;
-    } catch (e) {
-      print('  ⚠️  live ($id): $e');
-      todayErr++;
+      });
+    } else if (date.isNotEmpty &&
+               date.compareTo(todayStr) > 0 &&
+               date.compareTo(cutoffStr) < 0) {
+      // Gelecek maçlar
+      futureUpserts.add({
+        'fixture_id': id,
+        'date':       date,
+        'league_id':  compId,
+        'data':       rawData,
+        'updated_at': DateTime.now().toIso8601String(),
+      });
     }
   }
-  print('✅ Bugün: $todayOk yazıldı${todayErr > 0 ? ", $todayErr hatalı" : ""}');
 
-  // ═══ 4) Gelecek maçlar ═══════════════════════════════════════════
-  print('\n── Gelecek maçlar işleniyor ──');
-  final byDate = <String, List<Map<String, dynamic>>>{};
+  // ═══ 5) Batch upsert ════════════════════════════════════════════
+  print('\n── Yazılıyor ──');
+  print('  live_matches  : ${liveUpserts.length} kayıt (${liveFixtureIds.length} aktif canlı atlandı)');
+  print('  future_matches: ${futureUpserts.length} kayıt');
 
-  for (final ev in allEvents) {
-    final esd  = ev['esd'] as String? ?? '';
-    final date = esd.length >= 10 ? esd.substring(0, 10) : '';
-    if (date.isEmpty || date.compareTo(todayStr) <= 0) continue;
+  final liveErr   = await _batchUpsert(sb, 'live_matches',   liveUpserts,   'fixture_id');
+  final futureErr = await _batchUpsert(sb, 'future_matches', futureUpserts, 'fixture_id');
 
-    final cutoff    = trNow.add(const Duration(days: 5));
-    final cutoffStr = '${cutoff.year}-${pad(cutoff.month)}-${pad(cutoff.day)}';
-    if (date.compareTo(cutoffStr) >= 0) continue;
+  final totalErr = liveErr + futureErr;
 
-    (byDate[date] ??= []).add(ev);
-  }
-
-  int futureOk = 0, futureErr = 0;
-  for (int i = 1; i <= 4; i++) {
-    final d       = trNow.add(Duration(days: i));
-    final dateStr = '${d.year}-${pad(d.month)}-${pad(d.day)}';
-    final dayEvs  = byDate[dateStr] ?? [];
-    print('  📅 $dateStr: ${dayEvs.length} maç');
-
-    for (final ev in dayEvs) {
-      final id     = (ev['id'] as num).toInt();
-      final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
-      try {
-        await sb.from('future_matches').upsert({
-          'fixture_id': id,
-          'date':       dateStr,
-          'league_id':  compId,
-          'data':       _buildRawData(ev, logoMap),   // ← akıllı logo
-          'updated_at': DateTime.now().toIso8601String(),
-        }, onConflict: 'fixture_id');
-        futureOk++;
-      } catch (e) {
-        print('  ⚠️  future ($id): $e');
-        futureErr++;
-      }
-    }
-  }
-  print('✅ Gelecek: $futureOk yazıldı${futureErr > 0 ? ", $futureErr hatalı" : ""}');
-
-  final totalErr = todayErr + futureErr;
   print('\n═══════════════════════════════');
   print('  🖼  Logo mapping : ${logoMap.length} takım');
-  print('  ✅ Bugün         : $todayOk maç');
-  print('  ✅ Gelecek       : $futureOk maç');
+  print('  ✅ live_matches  : ${liveUpserts.length - liveErr} yazıldı');
+  print('  ✅ future_matches: ${futureUpserts.length - futureErr} yazıldı');
   if (totalErr > 0) print('  ❌ Hatalı        : $totalErr');
   print('═══════════════════════════════');
 
