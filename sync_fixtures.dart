@@ -404,8 +404,10 @@ Future<void> main() async {
   final liveErr   = await _batchUpsert(sb, 'live_matches',   liveUpserts,   'fixture_id');
   final futureErr = await _batchUpsert(sb, 'future_matches', futureUpserts, 'fixture_id');
 
-  // Logo senkronizasyonu team_logo_sync.py (Python) tarafından yapılır.
-  // O script hem sync_live_match_logos hem sync_future_match_logos RPC'lerini çağırır.
+  // ═══ 6) Logo RPC'leri çalıştır ════════════════════════════════
+  // Maçlar yazıldıktan SONRA — mapping güncel logoları uygular.
+  print('\n── Logo senkronizasyonu ──');
+  await _syncLogos(sb);
 
   final totalErr = liveErr + futureErr;
 
