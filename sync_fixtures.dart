@@ -37,6 +37,13 @@ Map<String, String> _headers({bool isLive = true}) => {
 
 // ── Normalizasyon ─────────────────────────────────────────────────────────────
 
+// SADECE ve SADECE bilgisayarın harf benzerliği ile asla bulamayacağı 
+// lakapları buraya ekle. (Kısaltmalara gerek kalmadı, algoritma çözecek)
+const _nicknames = <String, String>{
+  'spurs': 'tottenham',
+  'inter': 'internazionale',
+};
+
 // Bilyoner Türkçe şehir/takım adı parçaları → İngilizce karşılıkları
 const _wordTrToEn = <String, String>{
   'munih':    'munich',
@@ -51,44 +58,48 @@ const _wordTrToEn = <String, String>{
 
 // Normalize edilmeyecek kelimeler (prefix/suffix gürültüsü)
 const _noise = <String>{
-  'fc','sc','cf','ac','if','bk','sk',
+  'fc','sc','cf','ac','if','bk','sk','fk',
   'afc','bfc','cfc','sfc','rfc',
-  'cp','cd','sd','ud','rc','rcd',
+  'cp','cd','sd','ud','rc','rcd','as','ss',
 };
 
 String _norm(String name) {
-  var s = name
-      .replaceAll('ş', 's').replaceAll('Ş', 's')
-      .replaceAll('ğ', 'g').replaceAll('Ğ', 'g')
-      .replaceAll('ü', 'u').replaceAll('Ü', 'u')
-      .replaceAll('ö', 'o').replaceAll('Ö', 'o')
-      .replaceAll('ç', 'c').replaceAll('Ç', 'c')
-      .replaceAll('ı', 'i').replaceAll('İ', 'i')
-      .replaceAll('é', 'e').replaceAll('è', 'e').replaceAll('ê', 'e')
-      .replaceAll('á', 'a').replaceAll('à', 'a').replaceAll('â', 'a').replaceAll('ã', 'a').replaceAll('ä', 'a')
-      .replaceAll('ó', 'o').replaceAll('ò', 'o').replaceAll('ô', 'o').replaceAll('õ', 'o')
-      .replaceAll('ú', 'u').replaceAll('ù', 'u').replaceAll('û', 'u')
-      .replaceAll('í', 'i').replaceAll('ì', 'i').replaceAll('î', 'i')
-      .replaceAll('ñ', 'n').replaceAll('ø', 'o').replaceAll('å', 'a')
-      .replaceAll('ć', 'c').replaceAll('č', 'c').replaceAll('ž', 'z').replaceAll('š', 's')
-      .replaceAll('ý', 'y').replaceAll('ř', 'r').replaceAll('ů', 'u')
-      .replaceAll(RegExp(r"[.\-_/'\\()]"), ' ')
-      .toLowerCase();
+  var s = name.toLowerCase().trim();
+  
+  // Önce lakap kontrolü
+  if (_nicknames.containsKey(s)) {
+    s = _nicknames[s]!;
+  }
+
+  // Karakter temizliği
+  s = s.replaceAll('ş', 's').replaceAll('ğ', 'g').replaceAll('ü', 'u')
+      .replaceAll('ö', 'o').replaceAll('ç', 'c').replaceAll('ı', 'i')
+      .replaceAll(RegExp(r"[éèê]"), 'e')
+      .replaceAll(RegExp(r"[áàâãäå]"), 'a')
+      .replaceAll(RegExp(r"[óòôõø]"), 'o')
+      .replaceAll(RegExp(r"[úùûů]"), 'u')
+      .replaceAll(RegExp(r"[íìî]"), 'i')
+      .replaceAll('ñ', 'n')
+      .replaceAll(RegExp(r"[ćč]"), 'c')
+      .replaceAll('ž', 'z').replaceAll('š', 's')
+      .replaceAll('ý', 'y').replaceAll('ř', 'r');
+
+  // Noktaları boşluğa çeviriyoruz. Algoritma baş harfleri tek başına görebilsin.
+  s = s.replaceAll(RegExp(r"[.\-_/'\\()]"), ' ');
+
   final tokens = s.split(RegExp(r'\s+'))
       .where((t) => t.isNotEmpty && !_noise.contains(t))
       .map((t) => _wordTrToEn[t] ?? t)
       .toList();
+      
   return tokens.join(' ').trim();
 }
 
 // ── teams.json logo index ─────────────────────────────────────────────────────
 
 class _LogoIndex {
-  /// {(normName, countryLower): logo}  — tam eşleşme
   final Map<String, String> _exact = {};
-  /// normalize isim listesi — fuzzy için
   final List<String> _names = [];
-  /// _names ile aynı sıra
   final List<String> _logos = [];
   final List<String> _countries = [];
   int matched = 0;
@@ -99,10 +110,12 @@ class _LogoIndex {
       final name    = (t['name']    as String? ?? '').trim();
       final country = (t['country'] as String? ?? '').trim();
       final logo    = (t['api_logo'] as String? ?? '').trim();
+      
       if (name.isEmpty || logo.isEmpty) continue;
       final n = _norm(name);
+      
       _exact['$n|${country.toLowerCase()}'] = logo;
-      _exact['$n|'] = logo;   // ülkesiz fallback
+      _exact['$n|'] = logo;
       _names.add(n);
       _logos.add(logo);
       _countries.add(country.toLowerCase());
@@ -110,25 +123,24 @@ class _LogoIndex {
     print('🗂  Logo index: ${_names.length} takım (teams.json)');
   }
 
-  /// teamName: Bilyoner'den gelen ham isim
-  /// leagueCountry: extractCountryFromLeague() ile çıkarılmış İngilizce ülke
   String resolve(String teamName, String leagueCountry, int? teamId) {
     if (teamName.isEmpty) return _mackolik(teamId);
+    
     final q       = _norm(teamName);
     final country = leagueCountry.toLowerCase();
 
     // 1. Tam isim + ülke
-    final exact = _exact['\$q|\$country'];
+    final exact = _exact['$q|$country'];
     if (exact != null && exact.isNotEmpty) { matched++; return exact; }
 
     // 2. Tam isim + ülkesiz fallback
-    final noCountry = _exact['\$q|'];
+    final noCountry = _exact['$q|'];
     if (noCountry != null && noCountry.isNotEmpty) {
       matched++;
       return noCountry;
     }
 
-    // 3. Fuzzy
+    // 3. Akıllı Fuzzy Eşleşme
     String bestLogo    = '';
     double bestScore   = 0;
     String bestCountry = '';
@@ -142,72 +154,89 @@ class _LogoIndex {
       }
     }
 
-    if (bestScore >= 0.62) {
-      // Ülke farklıysa büyük ceza
+    if (bestScore >= 0.55) {
+      // Ülke farklıysa sadece çok düşük skorlarda ceza ver
       if (country.isNotEmpty && bestCountry.isNotEmpty && country != bestCountry) {
-        bestScore -= 0.25;
+        if (bestScore < 0.80) { 
+          bestScore -= 0.10; 
+        }
       }
-      if (bestScore >= 0.58 && bestLogo.isNotEmpty) {
+      
+      if (bestScore >= 0.50 && bestLogo.isNotEmpty) {
         matched++;
         return bestLogo;
       }
     }
 
-    // 4. Mackolik CDN fallback — en azından bir logo göster
+    // 4. Mackolik CDN fallback
     fallback++;
     return _mackolik(teamId);
   }
 
-  /// Mackolik CDN URL'i — teamId Bilyoner htpi/atpi
   String _mackolik(int? teamId) =>
-      teamId != null ? 'https://im.mackolik.com/img/logo/buyuk/\$teamId.gif' : '';
+      teamId != null ? 'https://im.mackolik.com/img/logo/buyuk/$teamId.gif' : '';
 
-  /// Gelişmiş token skoru:
-  ///   - Tam token eşleşmesi (Jaccard)
-  ///   - Prefix eşleşmesi: "f" → "fortuna", "b" → "borussia
-  ///   - Suffix eşleşmesi: "sittard" ∈ "fortuna sittard"
-  double _tokenScore(String a, String b) {
-    if (a == b) return 1.0;
-    final ta = a.split(' ');
-    final tb = b.split(' ');
-    if (ta.isEmpty || tb.isEmpty) return 0.0;
+  // Akıllı Algoritma ile Token Skorlama
+  double _tokenScore(String qStr, String tStr) {
+    if (qStr == tStr) return 1.0;
 
-    // Her a token'i için en iyi eşleşmeyi bul
-    int matched = 0;
-    for (final at in ta) {
-      bool found = false;
-      for (final bt in tb) {
-        if (at == bt) { found = true; break; }
-        // Prefix: kısa token uzun tokenin başı olabilir
-        // tek karakter bile prefix sayılır (F. Sittard → Fortuna Sittard)
-        if (bt.startsWith(at)) { found = true; break; }
-        if (at.startsWith(bt)) { found = true; break; }
-        // 3+ karakter prefix
-        if (at.length >= 3 && bt.length >= 3) {
-          final minLen = at.length < bt.length ? at.length : bt.length;
-          final prefLen = minLen < 4 ? minLen : 4;
-          if (at.substring(0, prefLen) == bt.substring(0, prefLen)) {
-            found = true; break;
+    final qTokens = qStr.split(' ');
+    final tTokens = tStr.split(' ');
+    if (qTokens.isEmpty || tTokens.isEmpty) return 0.0;
+
+    // Akronim/Kısaltma Kontrolü (Örn: "psg" vs "paris saint germain")
+    if (qTokens.length == 1 && tTokens.length > 1) {
+      String initials = tTokens.map((t) => t[0]).join('');
+      if (initials == qTokens[0] || initials.startsWith(qTokens[0])) {
+        return 0.95; 
+      }
+    }
+
+    double totalScore = 0.0;
+    int matchedTargetTokens = 0;
+
+    for (final qt in qTokens) {
+      double bestMatch = 0.0;
+
+      for (final tt in tTokens) {
+        double currentScore = 0.0;
+
+        if (qt == tt) {
+          currentScore = 1.0; 
+        } 
+        else if (tt.startsWith(qt)) {
+          if (qt.length == 1) {
+            currentScore = 0.85; 
+          } else {
+            currentScore = 0.85 + ((qt.length / tt.length) * 0.15); 
+          }
+        } 
+        else if (qt.startsWith(tt)) {
+           currentScore = 0.80; 
+        } 
+        else {
+          final minLen = qt.length < tt.length ? qt.length : tt.length;
+          if (minLen >= 4) {
+            if (qt.substring(0, 4) == tt.substring(0, 4)) {
+              currentScore = 0.70; 
+            }
+          }
+          else if (tt.contains(qt) || qt.contains(tt)) {
+            if (qt.length >= 3) currentScore = 0.65;
           }
         }
+
+        if (currentScore > bestMatch) bestMatch = currentScore;
       }
-      if (found) matched++;
+
+      totalScore += bestMatch;
+      if (bestMatch >= 0.65) matchedTargetTokens++;
     }
 
-    // Sorgunun TÜM tokenleri eşleştiyse yüksek puan — "Hannover" → "Hannover 96" gibi
-    final tokenRatio = ta.isEmpty ? 0.0 : matched / ta.length;
+    double qRatio = totalScore / qTokens.length;
+    double tRatio = matchedTargetTokens / tTokens.length;
 
-    // b'deki önemli tokenler a'da geçiyor mu?
-    int bInA = 0;
-    for (final bt in tb) {
-      if (bt.length < 3) continue;
-      for (final at in ta) {
-        if (at == bt || at.contains(bt) || bt.contains(at)) { bInA++; break; }
-      }
-    }
-    final bRatio = tb.isEmpty ? 0.0 : bInA / tb.length;
-
-    return (tokenRatio * 0.7 + bRatio * 0.3).clamp(0.0, 1.0);
+    return (qRatio * 0.85) + (tRatio * 0.15);
   }
 }
 
@@ -553,7 +582,7 @@ Future<void> main() async {
   print('\n═══════════════════════════════');
   print('  🗂  Logo index   : ${logoIndex._names.length} takım');
   print('  ✅ Logo eşleşti  : ${logoIndex.matched}');
-  print('  ⬜ Logo bulunamadı: ${logoIndex.fallback} (boş bırakıldı)');
+  print('  ⬜ Logo bulunamadı: ${logoIndex.fallback} (boş bırakıldı/Mackolik atandı)');
   print('  ✅ live_matches  : ${liveUpserts.length - liveErr} yazıldı');
   print('  ✅ future_matches: ${futureUpserts.length - futureErr} yazıldı');
   if (liveFixtureIds.isNotEmpty) print('  ⚽ Canlı korunan : ${liveFixtureIds.length}');
