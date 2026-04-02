@@ -105,6 +105,24 @@ String _norm(String name) {
 //  l → birincil logo URL  (api-sports.io veya mackolik)
 //  m → mackolik fallback URL
 
+/// Eşleşme sonucu kaydı — debug raporu için
+class _MatchResult {
+  final String bilyonerName;
+  final String country;
+  final String matchedName;   // '' → bulunamadı
+  final double score;         // -1 → tam eşleşme
+  final String logoUrl;
+  final String method;        // 'exact', 'fuzzy', 'fallback_m', 'fallback_id', 'empty'
+  const _MatchResult({
+    required this.bilyonerName,
+    required this.country,
+    required this.matchedName,
+    required this.score,
+    required this.logoUrl,
+    required this.method,
+  });
+}
+
 class _LogoIndex {
   final Map<String, String> _exact = {};
   final List<String> _names     = [];
@@ -113,6 +131,9 @@ class _LogoIndex {
   final List<String> _countries = [];
   int matched  = 0;
   int fallback = 0;
+
+  // Her benzersiz (bilyonerName, country) çifti için sonuç kaydı
+  final Map<String, _MatchResult> _log = {};
 
   _LogoIndex(List<dynamic> teams) {
     for (final t in teams) {
@@ -140,7 +161,20 @@ class _LogoIndex {
   /// Birincil logo URL'sini döndürür.
   /// Eşleşme bulunamazsa → teams.json m alanı → teamId tabanlı mackolik CDN.
   String resolve(String teamName, String leagueCountry, int? teamId) {
-    if (teamName.isEmpty) return _fallbackUrl(null, teamId);
+    final logKey = '$teamName|$leagueCountry';
+
+    String _record(_MatchResult r) {
+      if (!_log.containsKey(logKey)) _log[logKey] = r;
+      return r.logoUrl;
+    }
+
+    if (teamName.isEmpty) {
+      return _record(_MatchResult(
+        bilyonerName: teamName, country: leagueCountry,
+        matchedName: '', score: -1,
+        logoUrl: _fallbackUrl(null, teamId), method: 'empty',
+      ));
+    }
 
     final q       = _norm(teamName);
     final country = leagueCountry.toLowerCase();
@@ -149,14 +183,22 @@ class _LogoIndex {
     final exactWithCountry = _exact['$q|$country'];
     if (exactWithCountry != null && exactWithCountry.isNotEmpty) {
       matched++;
-      return exactWithCountry;
+      return _record(_MatchResult(
+        bilyonerName: teamName, country: leagueCountry,
+        matchedName: q, score: 1.0,
+        logoUrl: exactWithCountry, method: 'exact',
+      ));
     }
 
     // 2. Tam isim + ülkesiz fallback
     final exactNoCountry = _exact['$q|'];
     if (exactNoCountry != null && exactNoCountry.isNotEmpty) {
       matched++;
-      return exactNoCountry;
+      return _record(_MatchResult(
+        bilyonerName: teamName, country: leagueCountry,
+        matchedName: q, score: 1.0,
+        logoUrl: exactNoCountry, method: 'exact',
+      ));
     }
 
     // 3. Akıllı Fuzzy Eşleşme
@@ -183,15 +225,51 @@ class _LogoIndex {
 
       if (adjustedScore >= 0.50 && _logos[bestIdx].isNotEmpty) {
         matched++;
-        return _logos[bestIdx];
+        return _record(_MatchResult(
+          bilyonerName: teamName, country: leagueCountry,
+          matchedName: _names[bestIdx], score: adjustedScore,
+          logoUrl: _logos[bestIdx], method: 'fuzzy',
+        ));
       }
     }
 
-    // 4. teams.json'dan bulunan en iyi eşleşmenin mackolik URL'si
-    //    yoksa teamId tabanlı mackolik CDN
+    // 4. Fallback
     fallback++;
     final mackolikFromIndex = (bestIdx >= 0) ? _mackoliks[bestIdx] : '';
-    return _fallbackUrl(mackolikFromIndex, teamId);
+    final fallbackUrl = _fallbackUrl(mackolikFromIndex, teamId);
+    final method = fallbackUrl.isEmpty
+        ? 'empty'
+        : (mackolikFromIndex.isNotEmpty ? 'fallback_m' : 'fallback_id');
+    return _record(_MatchResult(
+      bilyonerName: teamName, country: leagueCountry,
+      matchedName: bestIdx >= 0 ? _names[bestIdx] : '',
+      score: bestIdx >= 0 ? bestScore : -1,
+      logoUrl: fallbackUrl, method: method,
+    ));
+  }
+
+  /// Eşleşme raporunu terminale basar.
+  void printReport() {
+    final results = _log.values.toList();
+
+    final matched  = results.where((r) => r.method == 'exact' || r.method == 'fuzzy').toList();
+    final fallbacks = results.where((r) => r.method.startsWith('fallback') || r.method == 'empty').toList();
+
+    if (fallbacks.isNotEmpty) {
+      print('\n── ⚠️  Eşleşemeyen takımlar (${fallbacks.length}) ──');
+      for (final r in fallbacks..sort((a, b) => a.bilyonerName.compareTo(b.bilyonerName))) {
+        final scoreStr = r.score >= 0 ? ' (en yakın skor: ${r.score.toStringAsFixed(2)}, "${r.matchedName}")' : '';
+        print('  ✗ [${r.method.padRight(11)}] "${r.bilyonerName}" [${r.country}]$scoreStr');
+      }
+    }
+
+    print('\n── ✅ Eşleşen takımlar (${matched.length}) ──');
+    for (final r in matched..sort((a, b) => a.bilyonerName.compareTo(b.bilyonerName))) {
+      final detail = r.method == 'fuzzy'
+          ? ' → "${r.matchedName}" (skor: ${r.score.toStringAsFixed(2)})'
+          : '';
+      print('  ✓ [${r.method.padRight(5)}] "${r.bilyonerName}" [${r.country}]$detail');
+    }
   }
 
   /// Fallback önceliği: teams.json m alanı → teamId tabanlı URL → boş string
@@ -601,6 +679,9 @@ Future<void> main() async {
   final futureErr = await _batchUpsert(sb, 'future_matches', futureUpserts, 'fixture_id');
 
   final totalErr = liveErr + futureErr;
+
+  // ═══ 6) Eşleşme raporu ══════════════════════════════════════════
+  logoIndex.printReport();
 
   print('\n═══════════════════════════════');
   print('  🗂  Logo index   : ${logoIndex._names.length} takım');
