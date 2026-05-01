@@ -454,6 +454,10 @@ Future<List<Map<String, dynamic>>> _fetchGamelist({
           .whereType<Map<String, dynamic>>()
           .where((e) => (e['st'] as int? ?? 0) == 1)
           .toList();
+      if (football.isNotEmpty) {
+  print('🔑 Event keys: ${football.first.keys.toList()}');
+  print('🔍 First event sample: ${football.first}');
+}
       print('📋 bulletinType=$bulletinType: ${eventsRaw.length} toplam → ${football.length} futbol');
       return football;
     } catch (e) {
