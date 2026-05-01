@@ -620,6 +620,7 @@ Future<void> main() async {
     final htpi   = (ev['htpi'] as num?)?.toInt();
     final atpi   = (ev['atpi'] as num?)?.toInt();
     final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
+    final mackolikLeagueId = (ev['lid'] as num?)?.toInt() ?? 0;  // ← ekle
     final brdId  = (ev['brdId'] as num?)?.toInt();
     final lgn    = ev['lgn'] as String? ?? '';
     final htn    = ev['htn'] as String? ?? '';
@@ -660,14 +661,15 @@ Future<void> main() async {
         'updated_at': DateTime.now().toIso8601String(),
       });
     } else if (date.isNotEmpty &&
-               date.compareTo(todayStr) > 0 &&
-               date.compareTo(cutoffStr) < 0) {
-      futureUpserts.add({
-        'fixture_id': id, 'date': date,
-        'league_id':  compId, 'data': rawData,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    }
+           date.compareTo(todayStr) > 0 &&
+           date.compareTo(cutoffStr) < 0) {
+  futureUpserts.add({
+    'fixture_id': id, 'date': todayStr,
+    'league_id':  mackolikLeagueId,   // ← burada da
+    'data': rawData,
+    'updated_at': DateTime.now().toIso8601String(),
+  });
+}
   }
 
   // ═══ 5) Batch upsert ════════════════════════════════════════════
