@@ -657,7 +657,7 @@ Future<void> main() async {
       }
       futureUpserts.add({
         'fixture_id': id, 'date': todayStr,
-        'league_id':  compId, 'data': rawData,
+        'league_id':  mackolikLeagueId,
         'updated_at': DateTime.now().toIso8601String(),
       });
     } else if (date.isNotEmpty &&
