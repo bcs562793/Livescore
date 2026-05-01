@@ -658,13 +658,14 @@ Future<void> main() async {
       futureUpserts.add({
         'fixture_id': id, 'date': todayStr,
         'league_id':  mackolikLeagueId,
+        'data': rawData,
         'updated_at': DateTime.now().toIso8601String(),
       });
     } else if (date.isNotEmpty &&
            date.compareTo(todayStr) > 0 &&
            date.compareTo(cutoffStr) < 0) {
   futureUpserts.add({
-    'fixture_id': id, 'date': todayStr,
+    'fixture_id': id, 'date': date,
     'league_id':  mackolikLeagueId,   // ← burada da
     'data': rawData,
     'updated_at': DateTime.now().toIso8601String(),
