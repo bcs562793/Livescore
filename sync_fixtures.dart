@@ -463,30 +463,6 @@ Future<List<Map<String, dynamic>>> _fetchGamelist({
   return [];
 }
 
-// ── Bilyoner event'inden Mackolik league_id çıkarma ──────────────────────────
-//
-// ev['m'] → [ [matchId, homeId, "Home", awayId, "Away", ...,
-//              [countryId, "Türkiye", leagueId, "Süper Lig", mackolikId, ...],
-//              flag] ]
-// Aranan değer: o iç dizinin index[2]'si  (örn. Süper Lig → 1)
-
-int _extractLeagueId(Map<String, dynamic> ev) {
-  final m = ev['m'];
-  if (m is! List || m.isEmpty) return 0;
-  final match = m.first;
-  if (match is! List) return 0;
-  // Sondan başa tarayarak [int, String, int, String, ...] kalıbındaki iç diziyi bul
-  for (int i = match.length - 1; i >= 0; i--) {
-    final el = match[i];
-    if (el is List && el.length >= 4 &&
-        el[0] is int && el[1] is String &&
-        el[2] is int && el[3] is String) {
-      return el[2] as int;
-    }
-  }
-  return 0;
-}
-
 // ── raw_data builder ─────────────────────────────────────────────────────────
 
 Map<String, dynamic> _buildRawData(
@@ -643,7 +619,7 @@ Future<void> main() async {
     final id     = (ev['id']   as num).toInt();
     final htpi   = (ev['htpi'] as num?)?.toInt();
     final atpi   = (ev['atpi'] as num?)?.toInt();
-    final compId = _extractLeagueId(ev);
+    final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
     final brdId  = (ev['brdId'] as num?)?.toInt();
     final lgn    = ev['lgn'] as String? ?? '';
     final htn    = ev['htn'] as String? ?? '';
