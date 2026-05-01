@@ -357,75 +357,6 @@ Future<_LogoIndex> _loadLogoIndex() async {
   }
 }
 
-// ── Mackolik livedata → league_id haritası ────────────────────────────────────
-//
-// https://vd.mackolik.com/livedata?date=DD/MM/YYYY yanıtındaki liste:
-//   Lig başlığı : [..., "ÜlkeAdı", ..., "LigAdı", mackolikLigId, ...]
-//                  index[1] String, index[3] String, index[4] num (büyük int)
-//   Maç kaydı  : [matchId, homeId, ...]
-//                  index[0] num, en az bir önceki lig başlığı görülmüş olmalı
-
-Future<Map<int, int>> _buildMackolikLeagueMap(List<String> dates) async {
-  final result = <int, int>{};
-  for (final date in dates) {
-    try {
-      final res = await http.get(
-        Uri.parse('https://vd.mackolik.com/livedata?date=$date'),
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-              'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Referer': 'https://www.mackolik.com/',
-          'Accept':  'application/json',
-        },
-      ).timeout(const Duration(seconds: 15));
-
-      if (res.statusCode != 200) {
-        print('⚠️  Mackolik livedata HTTP ${res.statusCode} ($date)');
-        continue;
-      }
-
-      final body  = jsonDecode(res.body);
-      final count = _parseMackolikLeagues(body, result);
-      print('📡 Mackolik ($date): $count maç league_id\'si eklendi');
-    } catch (e) {
-      print('⚠️  Mackolik livedata ($date): $e');
-    }
-  }
-  return result;
-}
-
-int _parseMackolikLeagues(dynamic body, Map<int, int> out) {
-  // Ana listeyi bul
-  List? items;
-  if (body is List) {
-    items = body;
-  } else if (body is Map) {
-    items = body['d'] as List? ?? body['data'] as List? ?? body['matches'] as List?;
-    items ??= body.values.whereType<List>().firstOrNull;
-  }
-  if (items == null || items.isEmpty) return 0;
-
-  // İlk öğeyi yap­ıyı anlamak için bas
-  print('  🔍 Mackolik örnek öğe: ${items.first}');
-
-  int currentLeagueId = 0;
-  int count = 0;
-
-  for (final item in items) {
-    if (item is! List || item.isEmpty) continue;
-    // Lig başlığı: index[1] ve index[3] String, index[4] büyük int
-    if (item.length >= 5 && item[1] is String && item[3] is String && item[4] is num) {
-      currentLeagueId = (item[4] as num).toInt();
-    }
-    // Maç kaydı: index[0] num (matchId), currentLeagueId atanmış
-    else if (currentLeagueId > 0 && item[0] is num) {
-      final matchId = (item[0] as num).toInt();
-      if (matchId > 0) { out[matchId] = currentLeagueId; count++; }
-    }
-  }
-  return count;
-}
-
 // ── Lig adından ülke çıkarma ──────────────────────────────────────────────────
 
 const Map<String, String> _lgCountryMap = {
@@ -530,6 +461,30 @@ Future<List<Map<String, dynamic>>> _fetchGamelist({
     }
   }
   return [];
+}
+
+// ── Bilyoner event'inden Mackolik league_id çıkarma ──────────────────────────
+//
+// ev['m'] → [ [matchId, homeId, "Home", awayId, "Away", ...,
+//              [countryId, "Türkiye", leagueId, "Süper Lig", mackolikId, ...],
+//              flag] ]
+// Aranan değer: o iç dizinin index[2]'si  (örn. Süper Lig → 1)
+
+int _extractLeagueId(Map<String, dynamic> ev) {
+  final m = ev['m'];
+  if (m is! List || m.isEmpty) return 0;
+  final match = m.first;
+  if (match is! List) return 0;
+  // Sondan başa tarayarak [int, String, int, String, ...] kalıbındaki iç diziyi bul
+  for (int i = match.length - 1; i >= 0; i--) {
+    final el = match[i];
+    if (el is List && el.length >= 4 &&
+        el[0] is int && el[1] is String &&
+        el[2] is int && el[3] is String) {
+      return el[2] as int;
+    }
+  }
+  return 0;
 }
 
 // ── raw_data builder ─────────────────────────────────────────────────────────
@@ -662,16 +617,7 @@ Future<void> main() async {
   for (final ev in liveEvents)     { allEventsMap[(ev['id'] as num).toInt()] = ev; }
   final allEvents = allEventsMap.values.toList();
 
-  // ═══ 3) Mackolik league_id haritası ════════════════════════════
-  print('\n── Mackolik league_id haritası oluşturuluyor ──');
-  final _macDates = List.generate(6, (i) {
-    final d = trNow.add(Duration(days: i));
-    return '${pad(d.day)}/${pad(d.month)}/${d.year}';
-  });
-  final leagueIdMap = await _buildMackolikLeagueMap(_macDates);
-  print('🏆 ${leagueIdMap.length} maç için Mackolik league_id bulundu');
-
-  // ═══ 4) Aktif canlı maçları al ══════════════════════════════════
+  // ═══ 3) Aktif canlı maçları al ══════════════════════════════════
   print('\n── Mevcut live durum sorgulanıyor ──');
   final Set<int> liveFixtureIds = {};
   try {
@@ -697,8 +643,7 @@ Future<void> main() async {
     final id     = (ev['id']   as num).toInt();
     final htpi   = (ev['htpi'] as num?)?.toInt();
     final atpi   = (ev['atpi'] as num?)?.toInt();
-    final compId = (ev['competitionId'] as num?)?.toInt() ?? 0;
-    final mackolikLeagueId = leagueIdMap[id] ?? compId;
+    final compId = _extractLeagueId(ev);
     final brdId  = (ev['brdId'] as num?)?.toInt();
     final lgn    = ev['lgn'] as String? ?? '';
     final htn    = ev['htn'] as String? ?? '';
@@ -724,7 +669,7 @@ Future<void> main() async {
           'away_score':   0,
           'status_short': 'NS',
           'elapsed_time': null,
-          'league_id':    mackolikLeagueId,
+          'league_id':    compId,
           'league_name':  lgn,
           'league_logo':  '',
           'betradar_id':  brdId,
@@ -735,7 +680,7 @@ Future<void> main() async {
       }
       futureUpserts.add({
         'fixture_id': id, 'date': todayStr,
-        'league_id':  mackolikLeagueId, 'data': rawData,
+        'league_id':  compId, 'data': rawData,
         'updated_at': DateTime.now().toIso8601String(),
       });
     } else if (date.isNotEmpty &&
@@ -743,7 +688,7 @@ Future<void> main() async {
                date.compareTo(cutoffStr) < 0) {
       futureUpserts.add({
         'fixture_id': id, 'date': date,
-        'league_id':  mackolikLeagueId, 'data': rawData,
+        'league_id':  compId, 'data': rawData,
         'updated_at': DateTime.now().toIso8601String(),
       });
     }
