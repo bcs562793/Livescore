@@ -661,24 +661,30 @@ Future<void> main() async {
   }
 
   // ═══ 4) Batch upsert öncesi deduplicate ═══
-final Map<int, Map<String, dynamic>> liveMap = {};
-for (final r in liveUpserts) {
-  liveMap[r['fixture_id'] as int] = r;
-}
-final Map<int, Map<String, dynamic>> futureMap = {};
-for (final r in futureUpserts) {
-  futureMap[r['fixture_id'] as int] = r;
-}
+  final Map<int, Map<String, dynamic>> liveMap = {};
+  for (final r in liveUpserts) {
+    liveMap[r['fixture_id'] as int] = r;
+  }
+  final Map<int, Map<String, dynamic>> futureMap = {};
+  for (final r in futureUpserts) {
+    futureMap[r['fixture_id'] as int] = r;
+  }
+
+  // BURASI DÜZELTİLDİ: Tekilleştirilen listeleri oluşturuyoruz
+  final uniqueLiveUpserts = liveMap.values.toList();
+  final uniqueFutureUpserts = futureMap.values.toList();
     
-  // ═══ 4) Batch upsert ════════════════════════════════════════════════
+  // ═══ 5) Batch upsert ════════════════════════════════════════════════
   print('\n── Yazılıyor ──');
-  print('  live_matches  : ${liveUpserts.length} kayıt');
-  print('  future_matches: ${futureUpserts.length} kayıt');
+  // Loglarda da tekil (doğru) kayıt sayısını gösteriyoruz
+  print('  live_matches  : ${uniqueLiveUpserts.length} kayıt');
+  print('  future_matches: ${uniqueFutureUpserts.length} kayıt');
 
-  final liveErr   = await _batchUpsert(sb, 'live_matches',   liveUpserts,   'fixture_id');
-  final futureErr = await _batchUpsert(sb, 'future_matches', futureUpserts, 'fixture_id');
+  // Supabase'e orijinal (mükerrer olabilen) listeleri DEĞİL, unique... listelerini gönderiyoruz
+  final liveErr   = await _batchUpsert(sb, 'live_matches',   uniqueLiveUpserts,   'fixture_id');
+  final futureErr = await _batchUpsert(sb, 'future_matches', uniqueFutureUpserts, 'fixture_id');
 
-  // ═══ 5) Rapor ═══════════════════════════════════════════════════════
+  // ═══ 6) Rapor ═══════════════════════════════════════════════════════
   logoIndex.printReport();
 
   final totalErr = liveErr + futureErr;
@@ -686,8 +692,8 @@ for (final r in futureUpserts) {
   print('  🗂  Logo index     : ${logoIndex._names.length} takım');
   print('  ✅ Logo eşleşti   : ${logoIndex.matched}');
   print('  ⬜ Logo fallback   : ${logoIndex.fallback}');
-  print('  ✅ live_matches   : ${liveUpserts.length - liveErr} yazıldı');
-  print('  ✅ future_matches : ${futureUpserts.length - futureErr} yazıldı');
+  print('  ✅ live_matches   : ${uniqueLiveUpserts.length - liveErr} yazıldı');
+  print('  ✅ future_matches : ${uniqueFutureUpserts.length - futureErr} yazıldı');
   if (liveFixtureIds.isNotEmpty) print('  ⚽ Canlı korunan  : ${liveFixtureIds.length}');
   if (totalErr > 0) print('  ❌ Hatalı         : $totalErr');
   print('═══════════════════════════════════════════');
