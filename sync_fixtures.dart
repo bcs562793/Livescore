@@ -406,7 +406,13 @@ Future<List<List<dynamic>>> _fetchMackolikDay(String ddmmyyyy) async {
       // Futbol filtresi: m[5] == 4, minimum 38 alan
       final football = raw
           .whereType<List<dynamic>>()
-          .where((m) => m.length >= 38 && (m[5] as num?)?.toInt() == 4)
+          .where((m) {
+  if (m.length < 38) return false;
+  final lgArr = m[36] as List<dynamic>? ?? const [];
+  if (lgArr.length <= 11) return false;
+  final sportType = (lgArr[11] as num?)?.toInt();
+  return sportType == 1;
+})
           .toList();
 
       print('📋 Mackolik $ddmmyyyy: ${raw.length} toplam → ${football.length} futbol');
@@ -654,6 +660,16 @@ Future<void> main() async {
     }
   }
 
+  // ═══ 4) Batch upsert öncesi deduplicate ═══
+final Map<int, Map<String, dynamic>> liveMap = {};
+for (final r in liveUpserts) {
+  liveMap[r['fixture_id'] as int] = r;
+}
+final Map<int, Map<String, dynamic>> futureMap = {};
+for (final r in futureUpserts) {
+  futureMap[r['fixture_id'] as int] = r;
+}
+    
   // ═══ 4) Batch upsert ════════════════════════════════════════════════
   print('\n── Yazılıyor ──');
   print('  live_matches  : ${liveUpserts.length} kayıt');
