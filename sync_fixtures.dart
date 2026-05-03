@@ -79,22 +79,75 @@ Future<List<Map<String, dynamic>>> _fetchBilyonerGamelist({
   return [];
 }
 
-/// Bilyoner event listesinden (home_norm, away_norm, date) → bilyoner_id eşleme tablosu üretir.
-/// Key: "home_norm|away_norm|YYYY-MM-DD"
-Map<String, int> _buildBilyonerLookup(List<Map<String, dynamic>> events) {
-  final map = <String, int>{};
-  for (final ev in events) {
-    final id  = (ev['id']  as num?)?.toInt();
-    final htn = ev['htn']  as String? ?? '';
-    final atn = ev['atn']  as String? ?? '';
-    final esd = ev['esd']  as String? ?? '';            // "YYYY-MM-DD..."
-    if (id == null || htn.isEmpty || atn.isEmpty) continue;
-    final date = esd.length >= 10 ? esd.substring(0, 10) : '';
-    final key  = '${_norm(htn)}|${_norm(atn)}|$date';
-    map[key] = id;
+/// Bilyoner event listesini fuzzy eşleştirme ile sorgulayan index.
+/// Mackolik isimleriyle Bilyoner isimlerini _tokenScore ile eşleştirir.
+class _BilyonerIndex {
+  final Map<String, int> _exact = {};          // "hNorm|aNorm|date" → id
+  final List<String> _hNorms = [], _aNorms = [], _dates = [];
+  final List<int>    _ids    = [];
+  int matched = 0, missed = 0;
+
+  _BilyonerIndex(List<Map<String, dynamic>> events) {
+    for (final ev in events) {
+      final id  = (ev['id'] as num?)?.toInt();
+      final htn = ev['htn'] as String? ?? '';
+      final atn = ev['atn'] as String? ?? '';
+      final esd = ev['esd'] as String? ?? '';
+      if (id == null || htn.isEmpty || atn.isEmpty) continue;
+      final date  = esd.length >= 10 ? esd.substring(0, 10) : '';
+      final hNorm = _norm(htn), aNorm = _norm(atn);
+      _exact['$hNorm|$aNorm|$date'] = id;   // exact önce dene
+      _hNorms.add(hNorm); _aNorms.add(aNorm);
+      _dates.add(date);   _ids.add(id);
+    }
+    print('🔗 Bilyoner index: ${_ids.length} maç');
   }
-  print('🔗 Bilyoner lookup: ${map.length} maç');
-  return map;
+
+  /// Mackolik [home], [away], [date] ile en iyi Bilyoner ID'sini döner.
+  int? resolve(String home, String away, String date) {
+    final hq = _norm(home), aq = _norm(away);
+
+    // 1) Exact match
+    final exact = _exact['$hq|$aq|$date'];
+    if (exact != null) { matched++; return exact; }
+
+    // 2) Fuzzy — aynı tarih, en yüksek kombine skor
+    int bestIdx = -1; double bestScore = 0;
+    for (int i = 0; i < _ids.length; i++) {
+      if (_dates[i] != date) continue;         // farklı gün → atla
+      final s = (_tokenScore(hq, _hNorms[i]) + _tokenScore(aq, _aNorms[i])) / 2;
+      if (s > bestScore) { bestScore = s; bestIdx = i; }
+    }
+    if (bestIdx >= 0 && bestScore >= 0.60) {
+      matched++;
+      return _ids[bestIdx];
+    }
+    missed++; return null;
+  }
+
+  double _tokenScore(String qStr, String tStr) {
+    if (qStr == tStr) return 1.0;
+    final qT = qStr.split(' '), tT = tStr.split(' ');
+    if (qT.isEmpty || tT.isEmpty) return 0.0;
+    double total = 0; int matched = 0;
+    for (final qt in qT) {
+      double best = 0;
+      for (final tt in tT) {
+        double cur = 0;
+        if (qt == tt)               { cur = 1.0; }
+        else if (tt.startsWith(qt)) { cur = qt.length == 1 ? 0.85 : 0.85 + (qt.length / tt.length * 0.15); }
+        else if (qt.startsWith(tt)) { cur = 0.80; }
+        else {
+          final min = qt.length < tt.length ? qt.length : tt.length;
+          if (min >= 4 && qt.substring(0, 4) == tt.substring(0, 4)) { cur = 0.70; }
+          else if ((tt.contains(qt) || qt.contains(tt)) && qt.length >= 3) { cur = 0.65; }
+        }
+        if (cur > best) best = cur;
+      }
+      total += best; if (best >= 0.65) matched++;
+    }
+    return (total / qT.length * 0.85) + (matched / tT.length * 0.15);
+  }
 }
 
 // Mackolik m[] array alan indeksleri
@@ -490,16 +543,16 @@ Future<List<List<dynamic>>> _fetchMackolikDay(String ddmmyyyy) async {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final raw = body['m'] as List<dynamic>? ?? [];
 
-      // Futbol filtresi: m[5] == 4, minimum 38 alan
+      // Futbol filtresi: lgArr[11] == 1, minimum 38 alan
       final football = raw
           .whereType<List<dynamic>>()
           .where((m) {
-  if (m.length < 38) return false;
-  final lgArr = m[36] as List<dynamic>? ?? const [];
-  if (lgArr.length <= 11) return false;
-  final sportType = (lgArr[11] as num?)?.toInt();
-  return sportType == 1;
-})
+            if (m.length < 38) return false;
+            final lgArr = m[36] as List<dynamic>? ?? const [];
+            if (lgArr.length <= 11) return false;
+            final sportType = (lgArr[11] as num?)?.toInt();
+            return sportType == 1;
+          })
           .toList();
 
       print('📋 Mackolik $ddmmyyyy: ${raw.length} toplam → ${football.length} futbol');
@@ -653,13 +706,13 @@ Future<void> main() async {
   print('\n── Logo index yükleniyor ──');
   final logoIndex = await _loadLogoIndex();
 
-  // ═══ 0b) Bilyoner lookup tablosu ════════════════════════════════════
+  // ═══ 0b) Bilyoner index ══════════════════════════════════════════════
   print('\n── Bilyoner gamelist çekiliyor ──');
   final bilyonerEvents = [
     ...await _fetchBilyonerGamelist(bulletinType: 2),   // maç önü
     ...await _fetchBilyonerGamelist(bulletinType: 1),   // canlı
   ];
-  final bilyonerLookup = _buildBilyonerLookup(bilyonerEvents);
+  final bilyonerIndex = _BilyonerIndex(bilyonerEvents);
 
   // ═══ 1) Temizlik ════════════════════════════════════════════════════
   print('\n── Eski kayıt temizliği ──');
@@ -681,7 +734,7 @@ Future<void> main() async {
   } catch (e) { print('  ⚠️  Canlı durum sorgulanamadı: $e'); }
 
   // ═══ 3) Mackolik verilerini çek ve işle ══════════════════════════
-  print('\n── Mackolik verileri çekiliyor (${totalDays} gün) ──');
+  print('\n── Mackolik verileri çekiliyor ($totalDays gün) ──');
 
   final List<Map<String, dynamic>> liveUpserts   = [];
   final List<Map<String, dynamic>> futureUpserts = [];
@@ -713,9 +766,8 @@ Future<void> main() async {
       final awayLogo = logoIndex.resolve(atn, country, awayId);
       final rawData  = _buildRawData(m, homeLogo: homeLogo, awayLogo: awayLogo, country: country);
 
-      // Bilyoner minfo_id — takım adı + tarih üzerinden eşleştir
-      final bilyonerKey = '${_norm(htn)}|${_norm(atn)}|${day.ymd}';
-      final minfoId = bilyonerLookup[bilyonerKey];
+      // Bilyoner minfo_id — fuzzy eşleştirme
+      final minfoId = bilyonerIndex.resolve(htn, atn, day.ymd);
       if (minfoId == null) { minfoMissed++; dayMissed++; }
 
       final short = _statusShort(statusTx);
@@ -776,17 +828,14 @@ Future<void> main() async {
     futureMap[r['fixture_id'] as int] = r;
   }
 
-  // BURASI DÜZELTİLDİ: Tekilleştirilen listeleri oluşturuyoruz
-  final uniqueLiveUpserts = liveMap.values.toList();
+  final uniqueLiveUpserts   = liveMap.values.toList();
   final uniqueFutureUpserts = futureMap.values.toList();
-    
+
   // ═══ 5) Batch upsert ════════════════════════════════════════════════
   print('\n── Yazılıyor ──');
-  // Loglarda da tekil (doğru) kayıt sayısını gösteriyoruz
   print('  live_matches  : ${uniqueLiveUpserts.length} kayıt');
   print('  future_matches: ${uniqueFutureUpserts.length} kayıt');
 
-  // Supabase'e orijinal (mükerrer olabilen) listeleri DEĞİL, unique... listelerini gönderiyoruz
   final liveErr   = await _batchUpsert(sb, 'live_matches',   uniqueLiveUpserts,   'fixture_id');
   final futureErr = await _batchUpsert(sb, 'future_matches', uniqueFutureUpserts, 'fixture_id');
 
@@ -801,9 +850,8 @@ Future<void> main() async {
   print('  ✅ live_matches   : ${uniqueLiveUpserts.length - liveErr} yazıldı');
   print('  ✅ future_matches : ${uniqueFutureUpserts.length - futureErr} yazıldı');
   if (liveFixtureIds.isNotEmpty) print('  ⚽ Canlı korunan  : ${liveFixtureIds.length}');
-  final minfoMatched = uniqueFutureUpserts.length - minfoMissed;
-  print('  🔗 minfo_id eşleşti: $minfoMatched / ${uniqueFutureUpserts.length}'
-      ' ($minfoMissed Bilyoner\'da yok)');
+  print('  🔗 minfo_id eşleşti: ${bilyonerIndex.matched} / ${uniqueFutureUpserts.length}'
+      ' (${bilyonerIndex.missed} Bilyoner\'da yok)');
   if (totalErr > 0) print('  ❌ Hatalı         : $totalErr');
   print('═══════════════════════════════════════════');
 
