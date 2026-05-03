@@ -685,12 +685,14 @@ Future<void> main() async {
 
   final List<Map<String, dynamic>> liveUpserts   = [];
   final List<Map<String, dynamic>> futureUpserts = [];
+  int minfoMissed = 0;
 
   for (final day in days) {
     print('\n  📆 ${day.ddmmyyyy}');
     await Future.delayed(const Duration(milliseconds: 300)); // nazik davran
 
     final matches = await _fetchMackolikDay(day.ddmmyyyy);
+    int dayMissed = 0;
 
     for (final m in matches) {
       final id     = (m[0] as num).toInt();
@@ -714,9 +716,7 @@ Future<void> main() async {
       // Bilyoner minfo_id — takım adı + tarih üzerinden eşleştir
       final bilyonerKey = '${_norm(htn)}|${_norm(atn)}|${day.ymd}';
       final minfoId = bilyonerLookup[bilyonerKey];
-      if (minfoId == null) {
-        print('  ⚠️  minfo_id bulunamadı: $htn vs $atn (${day.ymd})');
-      }
+      if (minfoId == null) { minfoMissed++; dayMissed++; }
 
       final short = _statusShort(statusTx);
 
@@ -762,6 +762,9 @@ Future<void> main() async {
         });
       }
     }
+    final dayMatched = matches.length - dayMissed;
+    print('  🔗 Bilyoner eşleşme: $dayMatched/${matches.length}'
+        '${dayMissed > 0 ? " ($dayMissed Bilyoner\'da yok — normal)" : " ✓"}');
   }
 
   // ═══ 4) Batch upsert öncesi deduplicate ═══
@@ -799,6 +802,9 @@ Future<void> main() async {
   print('  ✅ live_matches   : ${uniqueLiveUpserts.length - liveErr} yazıldı');
   print('  ✅ future_matches : ${uniqueFutureUpserts.length - futureErr} yazıldı');
   if (liveFixtureIds.isNotEmpty) print('  ⚽ Canlı korunan  : ${liveFixtureIds.length}');
+  final minfoMatched = uniqueFutureUpserts.length - minfoMissed;
+  print('  🔗 minfo_id eşleşti: $minfoMatched / ${uniqueFutureUpserts.length}'
+      ' ($minfoMissed Bilyoner\'da yok)');
   if (totalErr > 0) print('  ❌ Hatalı         : $totalErr');
   print('═══════════════════════════════════════════');
 
