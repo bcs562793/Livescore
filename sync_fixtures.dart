@@ -757,7 +757,6 @@ Future<void> main() async {
           'betradar_id':  brdId,
           'score_source': 'mackolik',
           'raw_data':     rawData,
-          'minfo_id':     minfoId,   // Bilyoner event ID
           'updated_at':   DateTime.now().toIso8601String(),
         });
       }
