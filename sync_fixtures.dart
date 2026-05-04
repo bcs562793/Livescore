@@ -670,7 +670,7 @@ Future<void> main() async {
         liveUpserts.add({
           'fixture_id':   id,
           'mackolik_id':  id,
-          'nesine_id':    nesineId,   // null → boş kalır, eşleşince dolar
+          'nesine_bid':    nesineId,   // null → boş kalır, eşleşince dolar
           'home_team':    htn,
           'away_team':    atn,
           'home_team_id': homeId,
@@ -717,7 +717,7 @@ Future<void> main() async {
   // ═══ 6) Rapor ═══════════════════════════════════════════════════════
   logoIndex.printReport();
 
-  final nesineMatched = uniqueLiveUpserts.where((r) => r['nesine_id'] != null).length;
+  final nesineMatched = uniqueLiveUpserts.where((r) => r['nesine_bid'] != null).length;
   final totalErr = liveErr + futureErr;
 
   print('\n═══════════════════════════════════════════');
