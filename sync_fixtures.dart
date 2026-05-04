@@ -591,10 +591,10 @@ Future<void> main() async {
   try {
     final nesineRows = await sb
         .from('live_matches')
-        .select('fixture_id, home_team, away_team, raw_data')
+        .select('nesine_bid, home_team, away_team, raw_data')
         .eq('score_source', 'nesine');
     for (final row in nesineRows) {
-      final nId  = row['fixture_id'] as int?;
+      final nId  = row['nesine_bid'] as int?;
       final home = row['home_team']  as String? ?? '';
       final away = row['away_team']  as String? ?? '';
       // Tarihi raw_data->fixture->date'den al ("YYYY-MM-DDTHH:MM:00+03:00")
