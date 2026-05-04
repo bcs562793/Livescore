@@ -380,7 +380,7 @@ Map<String, String> _mackolikHeaders() => {
 };
 
 /// Bir güne ait Mackolik verilerini çeker.
-/// Sadece futbol (sport_type == 4) ve geçerli uzunluktaki (>=38) kayıtları döner.
+/// Sadece futbol (sport_type == 1) ve geçerli uzunluktaki (>=38) kayıtları döner.
 Future<List<List<dynamic>>> _fetchMackolikDay(String ddmmyyyy) async {
   final uri = Uri.parse('$_mackolikBase/livedata?date=$ddmmyyyy');
   for (int attempt = 0; attempt < 3; attempt++) {
@@ -403,16 +403,15 @@ Future<List<List<dynamic>>> _fetchMackolikDay(String ddmmyyyy) async {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final raw = body['m'] as List<dynamic>? ?? [];
 
-      // Futbol filtresi: m[5] == 4, minimum 38 alan
       final football = raw
           .whereType<List<dynamic>>()
           .where((m) {
-  if (m.length < 38) return false;
-  final lgArr = m[36] as List<dynamic>? ?? const [];
-  if (lgArr.length <= 11) return false;
-  final sportType = (lgArr[11] as num?)?.toInt();
-  return sportType == 1;
-})
+            if (m.length < 38) return false;
+            final lgArr = m[36] as List<dynamic>? ?? const [];
+            if (lgArr.length <= 11) return false;
+            final sportType = (lgArr[11] as num?)?.toInt();
+            return sportType == 1;
+          })
           .toList();
 
       print('📋 Mackolik $ddmmyyyy: ${raw.length} toplam → ${football.length} futbol');
@@ -432,18 +431,18 @@ Map<String, dynamic> _buildRawData(
   required String awayLogo,
   required String country,
 }) {
-  final id       = (m[0] as num).toInt();
-  final homeId   = (m[1] as num?)?.toInt();
-  final awayId   = (m[3] as num?)?.toInt();
-  final statusTx = (m[6]  as String?) ?? '';
-  final scoreTx  = (m[7]  as String?) ?? '';
-  final timeStr  = (m[16] as String?) ?? '';
-  final dateStr  = (m[35] as String?) ?? '';   // "DD/MM/YYYY"
-  final lgArr    = m[36] as List<dynamic>? ?? const [];
+  final id        = (m[0] as num).toInt();
+  final homeId    = (m[1] as num?)?.toInt();
+  final awayId    = (m[3] as num?)?.toInt();
+  final statusTx  = (m[6]  as String?) ?? '';
+  final scoreTx   = (m[7]  as String?) ?? '';
+  final timeStr   = (m[16] as String?) ?? '';
+  final dateStr   = (m[35] as String?) ?? '';   // "DD/MM/YYYY"
+  final lgArr     = m[36] as List<dynamic>? ?? const [];
 
-  final short    = _statusShort(statusTx);
-  final elapsed  = _elapsedFrom(statusTx);
-  final isoDate  = _toIso(dateStr, timeStr);
+  final short     = _statusShort(statusTx);
+  final elapsed   = _elapsedFrom(statusTx);
+  final isoDate   = _toIso(dateStr, timeStr);
   final timestamp = _toTimestamp(dateStr, timeStr);
 
   int? homeGoals, awayGoals;
@@ -585,8 +584,36 @@ Future<void> main() async {
     print('  ⚽ Aktif canlı maç: ${liveFixtureIds.length}');
   } catch (e) { print('  ⚠️  Canlı durum sorgulanamadı: $e'); }
 
+  // ═══ 2b) Nesine ID lookup tablosu ════════════════════════════════════
+  // key: "norm(home)|norm(away)|YYYY-MM-DD"  →  nesine fixture_id
+  print('\n── Nesine ID\'leri sorgulanıyor ──');
+  final Map<String, int> nesineIndex = {};
+  try {
+    final nesineRows = await sb
+        .from('live_matches')
+        .select('fixture_id, home_team, away_team, raw_data')
+        .eq('score_source', 'nesine');
+    for (final row in nesineRows) {
+      final nId  = row['fixture_id'] as int?;
+      final home = row['home_team']  as String? ?? '';
+      final away = row['away_team']  as String? ?? '';
+      // Tarihi raw_data->fixture->date'den al ("YYYY-MM-DDTHH:MM:00+03:00")
+      String dateKey = '';
+      try {
+        final rd  = row['raw_data'] as Map<String, dynamic>?;
+        final iso = rd?['fixture']?['date'] as String? ?? '';
+        if (iso.length >= 10) dateKey = iso.substring(0, 10); // "YYYY-MM-DD"
+      } catch (_) {}
+      if (nId != null && home.isNotEmpty && away.isNotEmpty) {
+        final key = '${_norm(home)}|${_norm(away)}|$dateKey';
+        nesineIndex[key] = nId;
+      }
+    }
+    print('  📋 Nesine kayıt: ${nesineIndex.length}');
+  } catch (e) { print('  ⚠️  Nesine sorgulanamadı: $e'); }
+
   // ═══ 3) Mackolik verilerini çek ve işle ══════════════════════════
-  print('\n── Mackolik verileri çekiliyor (${totalDays} gün) ──');
+  print('\n── Mackolik verileri çekiliyor ($totalDays gün) ──');
 
   final List<Map<String, dynamic>> liveUpserts   = [];
   final List<Map<String, dynamic>> futureUpserts = [];
@@ -598,18 +625,18 @@ Future<void> main() async {
     final matches = await _fetchMackolikDay(day.ddmmyyyy);
 
     for (final m in matches) {
-      final id     = (m[0] as num).toInt();
-      final homeId = (m[1] as num?)?.toInt();
-      final awayId = (m[3] as num?)?.toInt();
-      final htn    = (m[2] as String?) ?? '';
-      final atn    = (m[4] as String?) ?? '';
+      final id       = (m[0] as num).toInt();
+      final homeId   = (m[1] as num?)?.toInt();
+      final awayId   = (m[3] as num?)?.toInt();
+      final htn      = (m[2] as String?) ?? '';
+      final atn      = (m[4] as String?) ?? '';
       final statusTx = (m[6] as String?) ?? '';
       final scoreTx  = (m[7] as String?) ?? '';
-      final brdId  = (m[14] as num?)?.toInt();
-      final lgArr  = m[36] as List<dynamic>? ?? const [];
-      final lgId   = lgArr.length > 2 ? (lgArr[2] as num?)?.toInt() ?? 0 : 0;
-      final lgName = lgArr.length > 3 ? lgArr[3] as String? ?? '' : '';
-      final cntryTr = lgArr.length > 1 ? lgArr[1] as String? ?? '' : '';
+      final brdId    = (m[14] as num?)?.toInt();
+      final lgArr    = m[36] as List<dynamic>? ?? const [];
+      final lgId     = lgArr.length > 2 ? (lgArr[2] as num?)?.toInt() ?? 0 : 0;
+      final lgName   = lgArr.length > 3 ? lgArr[3] as String? ?? '' : '';
+      final cntryTr  = lgArr.length > 1 ? lgArr[1] as String? ?? '' : '';
 
       final country  = _countryFromTr(cntryTr);
       final homeLogo = logoIndex.resolve(htn, country, homeId);
@@ -636,9 +663,14 @@ Future<void> main() async {
           awayGoals = int.tryParse(parts.length > 1 ? parts[1].trim() : '');
         }
 
+        // Nesine ID eşleştirme: norm(home)|norm(away)|YYYY-MM-DD
+        final nesineKey = '${_norm(htn)}|${_norm(atn)}|${day.ymd}';
+        final nesineId  = nesineIndex[nesineKey];
+
         liveUpserts.add({
           'fixture_id':   id,
-          'mackolik_id':   id,
+          'mackolik_id':  id,
+          'nesine_id':    nesineId,   // null → boş kalır, eşleşince dolar
           'home_team':    htn,
           'away_team':    atn,
           'home_team_id': homeId,
@@ -661,34 +693,40 @@ Future<void> main() async {
     }
   }
 
-  // ═══ 4) Batch upsert öncesi deduplicate ═══
-final Map<int, Map<String, dynamic>> liveMap = {};
-for (final r in liveUpserts) {
-  liveMap[r['fixture_id'] as int] = r;
-}
-final Map<int, Map<String, dynamic>> futureMap = {};
-for (final r in futureUpserts) {
-  futureMap[r['fixture_id'] as int] = r;
-}
-    
-  // ═══ 4) Batch upsert ════════════════════════════════════════════════
+  // ═══ 4) Deduplicate ════════════════════════════════════════════════
+  final Map<int, Map<String, dynamic>> liveMap = {};
+  for (final r in liveUpserts) {
+    liveMap[r['fixture_id'] as int] = r;
+  }
+  final Map<int, Map<String, dynamic>> futureMap = {};
+  for (final r in futureUpserts) {
+    futureMap[r['fixture_id'] as int] = r;
+  }
+
+  final uniqueLiveUpserts   = liveMap.values.toList();
+  final uniqueFutureUpserts = futureMap.values.toList();
+
+  // ═══ 5) Batch upsert ════════════════════════════════════════════════
   print('\n── Yazılıyor ──');
-  print('  live_matches  : ${liveUpserts.length} kayıt');
-  print('  future_matches: ${futureUpserts.length} kayıt');
+  print('  live_matches  : ${uniqueLiveUpserts.length} kayıt');
+  print('  future_matches: ${uniqueFutureUpserts.length} kayıt');
 
-  final liveErr   = await _batchUpsert(sb, 'live_matches',   liveUpserts,   'fixture_id');
-  final futureErr = await _batchUpsert(sb, 'future_matches', futureUpserts, 'fixture_id');
+  final liveErr   = await _batchUpsert(sb, 'live_matches',   uniqueLiveUpserts,   'fixture_id');
+  final futureErr = await _batchUpsert(sb, 'future_matches', uniqueFutureUpserts, 'fixture_id');
 
-  // ═══ 5) Rapor ═══════════════════════════════════════════════════════
+  // ═══ 6) Rapor ═══════════════════════════════════════════════════════
   logoIndex.printReport();
 
+  final nesineMatched = uniqueLiveUpserts.where((r) => r['nesine_id'] != null).length;
   final totalErr = liveErr + futureErr;
+
   print('\n═══════════════════════════════════════════');
   print('  🗂  Logo index     : ${logoIndex._names.length} takım');
   print('  ✅ Logo eşleşti   : ${logoIndex.matched}');
   print('  ⬜ Logo fallback   : ${logoIndex.fallback}');
-  print('  ✅ live_matches   : ${liveUpserts.length - liveErr} yazıldı');
-  print('  ✅ future_matches : ${futureUpserts.length - futureErr} yazıldı');
+  print('  ✅ live_matches   : ${uniqueLiveUpserts.length - liveErr} yazıldı');
+  print('  ✅ future_matches : ${uniqueFutureUpserts.length - futureErr} yazıldı');
+  print('  🔗 Nesine eşleşti : $nesineMatched / ${uniqueLiveUpserts.length}');
   if (liveFixtureIds.isNotEmpty) print('  ⚽ Canlı korunan  : ${liveFixtureIds.length}');
   if (totalErr > 0) print('  ❌ Hatalı         : $totalErr');
   print('═══════════════════════════════════════════');
