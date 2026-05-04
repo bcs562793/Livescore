@@ -638,6 +638,7 @@ Future<void> main() async {
 
         liveUpserts.add({
           'fixture_id':   id,
+          'mackolik_id':   id,
           'home_team':    htn,
           'away_team':    atn,
           'home_team_id': homeId,
