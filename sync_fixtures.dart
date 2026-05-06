@@ -635,7 +635,7 @@ Future<void> main() async {
       final brdId    = (m[14] as num?)?.toInt();
       final lgArr    = m[36] as List<dynamic>? ?? const [];
       final lgId     = lgArr.length > 2 ? (lgArr[2] as num?)?.toInt() ?? 0 : 0;
-      final lgName   = lgArr.length > 3 ? lgArr[3] as String? ?? '' : '';
+      final lgName   = lgArr.length > 1 ? lgArr[1] as String? ?? '' : '';
       final cntryTr  = lgArr.length > 1 ? lgArr[1] as String? ?? '' : '';
 
       final country  = _countryFromTr(cntryTr);
