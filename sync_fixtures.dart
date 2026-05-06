@@ -655,7 +655,7 @@ Future<void> main() async {
       });
 
       // ── live_matches: sadece bugün, sadece NS ve henüz canlı olmayan maçlar ──
-      if (day.ymd == todayYMD && short == 'NS' && !liveFixtureIds.contains(id)) {
+      if (day.ymd == todayYMD && !liveFixtureIds.contains(id)) {
         int? homeGoals, awayGoals;
         if (scoreTx.contains('-')) {
           final parts = scoreTx.split('-');
