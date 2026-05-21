@@ -66,8 +66,11 @@ def upsert(rows):
         print("⚠️  Yazılacak satır yok")
         return
 
+    # URL'nin sonuna "?on_conflict=nesine_bid" eklendi
+    url = f"{SUPABASE_URL}/rest/v1/future_bball?on_conflict=nesine_bid"
+
     r = requests.post(
-        f"{SUPABASE_URL}/rest/v1/future_bball",
+        url,
         headers=SB_HEADERS,
         json=rows,
         timeout=30,
