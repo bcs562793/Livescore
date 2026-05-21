@@ -1,0 +1,30 @@
+name: Basketball Fixture Scraper
+
+on:
+  schedule:
+    - cron: "0 3 * * *"   # Her gün 03:00 UTC (sabah 06:00 TR)
+  workflow_dispatch:        # Elle tetikleme
+
+jobs:
+  scrape:
+    name: 🏀 Nesine → future_bball
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bağımlılıkları yükle
+        run: pip install requests
+
+      - name: Fikstürü çek ve yaz
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python bball_fixture_scraper.py
