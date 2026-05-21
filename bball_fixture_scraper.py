@@ -17,7 +17,15 @@ SB_HEADERS = {
 
 def fetch_fixtures():
     print("📡 Nesine fikstürü çekiliyor...")
-    r = requests.get(BULTEN_URL, timeout=30)
+    
+    # Nesine'nin isteği engellememesi için tarayıcı kimliği (User-Agent) ekliyoruz
+    req_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+    
+    # Timeout süresini 60 saniyeye çıkarıyoruz
+    r = requests.get(BULTEN_URL, headers=req_headers, timeout=60)
     r.raise_for_status()
     data = r.json()
 
