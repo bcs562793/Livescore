@@ -1,0 +1,31 @@
+name: Voleybol Fixture Sync
+
+on:
+  schedule:
+    # Cron UTC çalışır — Türkiye UTC+3:
+    #   21:15 UTC = 00:15 TR  (gece yarısından sonra, yeni günün bülteni)
+    #   04:00 UTC = 07:00 TR  (sabah güncellemesi, gece eklenen maçlar)
+    - cron: "15 21 * * *"
+    - cron: "0 4 * * *"
+  workflow_dispatch: {}   # elle tetikleme
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bağımlılıklar
+        run: pip install requests
+
+      - name: Fixture sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python vball_fixture_sync.py
