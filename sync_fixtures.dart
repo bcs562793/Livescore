@@ -737,6 +737,15 @@ Future<void> main() async {
   if (totalErr > 0) print('  ❌ Hatalı         : $totalErr');
   print('═══════════════════════════════════════════');
 
+  // ═══ 7) TM köprüsü (mac_t_id) güncelle ═══════════════════════════════
+  print('\n── TM köprüsü senkronize ediliyor ──');
+  try {
+    final newMatches = await sb.rpc('sync_mac_bridge');
+    print('  🔗 TM↔Mackolik: $newMatches yeni takım eşlendi');
+  } catch (e) {
+    print('  ⚠️  TM köprüsü güncellenemedi: $e');
+  }  
+
   await sb.dispose();
   exit(totalErr > 0 ? 1 : 0);
 }
