@@ -3,7 +3,7 @@ name: Fikstür Senkronizasyonu
 on:
   workflow_dispatch:
   schedule:
-    - cron: '30 21 * * *'       # Her gün 00:30 TR (UTC+3 = UTC 21:00)
+    - cron: '35 21 * * *'       # Her gün 00:30 TR (UTC+3 = UTC 21:00)
 
 jobs:
   sync:
