@@ -78,7 +78,7 @@ void main() async {
   }
 
   final sb = SupabaseClient(sbUrl, sbKey);
-  int targetSeason = 2026; // Geçerli sezon
+  int targetSeason = 2027; // Geçerli sezon
 
   // ─── 40 LİG LİSTESİ BURAYA GELECEK ───
   // Format: { Lig ID'si : O Lige Ait Herhangi Bir Geçerli Mackolik Maç ID'si }
